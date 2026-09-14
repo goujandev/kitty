@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "What the main window is allowed to do. Slice 1 needs almost nothing: its own commands, and opening a vendor's documentation in the system browser.",
+  "windows": ["main"],
+  "permissions": ["core:default", "opener:allow-open-url"]
+}

@@ -1,0 +1,15 @@
+/target
+/node_modules
+/dist
+.DS_Store
+*.log
+
+# Tauri build output
+/src-tauri/target
+/src-tauri/gen
+
+# Generated IPC bindings are committed on purpose; see docs/adr/0001.
+# Nothing else generated is.
+
+# Local screenshots from manual verification runs.
+/.screenshots

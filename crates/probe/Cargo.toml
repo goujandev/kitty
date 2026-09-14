@@ -1,0 +1,22 @@
+[package]
+name = "kitty-probe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Finds agent CLIs, identifies them, and reads their login state. Read-only."
+
+[lints]
+workspace = true
+
+[dependencies]
+kitty-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
+[dev-dependencies]
+tempfile = "3"

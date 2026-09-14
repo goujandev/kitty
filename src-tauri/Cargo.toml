@@ -1,0 +1,24 @@
+[package]
+name = "kitty"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "A desktop UI for the coding agents you already have."
+
+[lib]
+name = "kitty_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+kitty-core = { workspace = true }
+kitty-probe = { workspace = true }
+serde = { workspace = true }
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"

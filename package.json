@@ -1,0 +1,31 @@
+{
+  "name": "kitty",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "npm run check && vite build",
+    "preview": "vite preview",
+    "check": "node scripts/check-contract.mjs && tsc --noEmit",
+    "tauri": "tauri",
+    "start": "tauri dev",
+    "bundle": "tauri build --bundles nsis",
+    "check:contract": "node scripts/check-contract.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^26.5.1",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5",
+    "typescript": "~5.8.3",
+    "vite": "^7"
+  }
+}

@@ -1,0 +1,5 @@
+# `unwrap`/`expect` are denied in the workspace lints, but a test that cannot
+# unwrap is a test nobody writes. ADR-0001 denies them "outside tests".
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
