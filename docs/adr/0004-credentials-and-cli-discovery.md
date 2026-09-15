@@ -52,6 +52,14 @@ rotating Claude's OAuth token", so this is recognized there too.
 
 ### Usage: ask the CLI first, read-only file second, nothing third
 
+**Confirmed better than expected (2026-09-15).** Claude Code's stream-json
+output emits a `rate_limit_event` in-band on every turn, carrying
+`unifiedWindows.five_hour` and `seven_day` utilisation and reset times. Codex
+answers `account/rateLimits/read` over its app-server. So both vendors hand us
+the usage data directly, and kitty never needs to read a credential file to
+show it, let alone refresh a token. `MonoCode` impersonates Anthropic's OAuth
+client to fetch the same numbers it could have read out of the stream.
+
 1. If the CLI can report usage over its own protocol, use that. This is free,
    correct, and needs no credential access.
 2. Otherwise read the credential file read-only, purely to display status and
@@ -96,9 +104,10 @@ will not.
 
 ## Consequences
 
-- kitty can never show Claude usage as precisely as a client that refreshes the
-  token. That is an acceptable trade for not touching the vendor's store, and
-  it improves the moment the CLI exposes usage itself.
+- We expected to show usage less precisely than a client that refreshes the
+  token, and accepted that. It turned out not to be a trade at all: both CLIs
+  report usage themselves, so kitty gets the same numbers without touching a
+  credential file. The restraint cost nothing.
 - The user must log in with the vendor CLI once. That is already true of
   MonoCode and is the premise of the product.
 - If a provider blocks third-party clients, kitty is unaffected, because

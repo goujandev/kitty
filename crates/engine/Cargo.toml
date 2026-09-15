@@ -1,0 +1,18 @@
+[package]
+name = "kitty-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The generic session engine: one lifecycle and turn queue for every harness."
+
+[lints]
+workspace = true
+
+[dependencies]
+kitty-core = { workspace = true }
+kitty-harness = { workspace = true }
+kitty-supervisor = { workspace = true }
+
+[dev-dependencies]
+kitty-probe = { workspace = true }

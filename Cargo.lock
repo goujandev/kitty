@@ -1951,6 +1951,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "kitty-engine"
+version = "0.1.0"
+dependencies = [
+ "kitty-core",
+ "kitty-harness",
+ "kitty-probe",
+ "kitty-supervisor",
+]
+
+[[package]]
+name = "kitty-harness"
+version = "0.1.0"
+dependencies = [
+ "kitty-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "kitty-probe"
 version = "0.1.0"
 dependencies = [
@@ -1960,6 +1979,15 @@ dependencies = [
  "serde_json",
  "tempfile",
  "winreg",
+]
+
+[[package]]
+name = "kitty-supervisor"
+version = "0.1.0"
+dependencies = [
+ "kitty-core",
+ "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

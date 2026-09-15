@@ -1,0 +1,25 @@
+[package]
+name = "kitty-supervisor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Spawns and supervises agent CLI child processes."
+
+[lints]
+workspace = true
+
+[dependencies]
+kitty-core = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    # CreateJobObjectW takes SECURITY_ATTRIBUTES, so it sits behind this.
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+tempfile = "3"

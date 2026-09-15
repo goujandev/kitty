@@ -5,10 +5,14 @@
 //! above may depend on this crate; it depends on nothing above it
 //! (ARCHITECTURE.md §3).
 
+mod event;
 mod harness;
 mod status;
 mod version;
 
+pub use event::{
+    snapshot_remainder, DeltaMode, ErrorKind, RateLimitWindow, SessionEvent, StopReason, Usage,
+};
 pub use harness::{HarnessDescriptor, HarnessId, CLAUDE, CODEX};
 pub use status::{HarnessStatus, Hint, InstallState, LoginState, Scan};
 pub use version::Version;

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/probe", "src-tauri"]
+members = ["crates/core", "crates/probe", "crates/supervisor", "crates/harness", "crates/engine", "src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,6 +12,9 @@ repository = "https://github.com/goujan/kitty"
 [workspace.dependencies]
 kitty-core = { path = "crates/core" }
 kitty-probe = { path = "crates/probe" }
+kitty-supervisor = { path = "crates/supervisor" }
+kitty-harness = { path = "crates/harness" }
+kitty-engine = { path = "crates/engine" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

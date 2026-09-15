@@ -75,6 +75,18 @@ recorder and fixtures for both CLIs.
 retrofit than to build in, so they arrive with the first transcript rather than
 after it. This is the biggest slice and where most of the technical risk lives.
 
+**Status: half built.** Protocols proven against the installed CLIs and
+recorded to `fixtures/`; the vendor's own schema for the Codex app-server is
+alongside them. The supervisor, the event vocabulary, both codecs and the
+engine are done and a reply streams end to end:
+
+```
+cargo run -p kitty-engine --example chat -- claude "Say hello in three words."
+cargo run -p kitty-engine --example chat -- codex  "Say hello in three words."
+```
+
+Still to do in this slice: the SQLite store, and the transcript view.
+
 ### S3 — real work happens
 
 **What you can do:** ask an agent to change a file. Tool activity appears as it
