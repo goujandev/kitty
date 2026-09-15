@@ -50,10 +50,13 @@ function walk(value) {
 // a heading in this file, not a field Rust ever sends over IPC.
 walk(contract.installStates);
 walk(contract.loginStates);
+walk(contract.stopReasons);
+walk(contract.transcriptEvents);
 walk(contract.scan);
 
 // Harness ids are a bare string union rather than tagged objects.
 for (const id of contract.harnessIds ?? []) tags.add(id);
+for (const kind of contract.blockKinds ?? []) tags.add(kind);
 
 const problems = [];
 

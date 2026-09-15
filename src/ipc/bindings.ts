@@ -1,10 +1,10 @@
 /**
- * The wire types, mirroring `crates/core`.
+ * The wire types, mirroring `crates/core` and `crates/store`.
  *
- * These are checked against the Rust definitions by `scripts/check-contract.mjs`,
- * which runs as part of `npm run check`. Rust writes `contract.json` from its
- * own types; the script proves every tag and field in that file appears here.
- * So renaming a field in Rust without touching this file fails the build.
+ * Checked against the Rust definitions by `scripts/check-contract.mjs`, which
+ * runs as part of `npm run check`. Rust writes `contract.json` from its own
+ * types; the script proves every tag and field in that file appears here. So
+ * renaming a field in Rust without touching this file fails the build.
  */
 
 export type HarnessId = "claude" | "codex";
@@ -66,8 +66,129 @@ export interface Scan {
   pathDirs: number;
 }
 
+// ------------------------------------------------------------- transcripts
+
+export type BlockKind = "user" | "assistant" | "reasoning";
+
+export interface Block {
+  seq: number;
+  kind: BlockKind;
+  text: string;
+  createdAt: number;
+}
+
+export interface Usage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
+}
+
+export interface RateLimitWindow {
+  label: string;
+  /** 0 to 1. */
+  utilization: number;
+  resetsAtMs: number | null;
+}
+
+export type ErrorKind =
+  | "auth"
+  | "rateLimited"
+  | "transient"
+  | "invalid"
+  | "process"
+  | "protocol";
+
+/** Why a turn stopped. */
+export type StopReason =
+  | { kind: "endTurn" }
+  | { kind: "maxTokens" }
+  | { kind: "refusal"; category: string | null }
+  | { kind: "cancelled" }
+  | { kind: "interrupted" }
+  | { kind: "failed"; message: string }
+  | { kind: "other"; reason: string };
+
+/**
+ * What the transcript view is told.
+ *
+ * Block identity is already resolved by the host, so the UI only appends text
+ * to a numbered row. It never has to decide what a transcript is (ADR-0003).
+ */
+export type TranscriptEvent =
+  | { kind: "sessionReady"; model: string | null }
+  | { kind: "blockAppended"; seq: number; blockKind: BlockKind; text: string }
+  | { kind: "blockDelta"; seq: number; text: string }
+  | { kind: "blockFinal"; seq: number; text: string }
+  | { kind: "turnEnded"; stop: StopReason }
+  | { kind: "usage"; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number }
+  | { kind: "context"; used: number | null; window: number | null }
+  | { kind: "rateLimits"; windows: RateLimitWindow[] }
+  | { kind: "status"; text: string }
+  | { kind: "failed"; errorKind: ErrorKind; message: string };
+
+/** One batch of events for one session. */
+export interface TranscriptBatch {
+  sessionId: string;
+  events: TranscriptEvent[];
+}
+
+// ------------------------------------------------------ projects & sessions
+
+export interface Project {
+  id: string;
+  root: string;
+  name: string;
+  createdAt: number;
+  lastOpenedAt: number;
+}
+
+export interface SessionRow {
+  id: string;
+  projectId: string;
+  harness: HarnessId;
+  model: string | null;
+  providerSession: string | null;
+  title: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface Hit {
+  sessionId: string;
+  seq: number;
+  snippet: string;
+}
+
+// ------------------------------------------------------------------ helpers
+
 export function formatVersion(v: Version): string {
   return `${v.major}.${v.minor}.${v.patch}`;
+}
+
+/** Plain-English reason a turn stopped, or null when it simply finished. */
+export function describeStop(stop: StopReason): string | null {
+  switch (stop.kind) {
+    case "endTurn":
+      return null;
+    case "maxTokens":
+      return "Stopped at the output limit.";
+    case "refusal":
+      return stop.category
+        ? `Declined (${stop.category}).`
+        : "The model declined to answer.";
+    case "cancelled":
+      return "Stopped.";
+    case "interrupted":
+      return "The agent exited before finishing.";
+    case "failed":
+      return stop.message;
+    case "other":
+      return stop.reason;
+    default:
+      return assertNever(stop, "StopReason");
+  }
 }
 
 /**

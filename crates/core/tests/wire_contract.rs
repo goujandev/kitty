@@ -10,7 +10,10 @@
 //!
 //! To accept an intentional change: `UPDATE_CONTRACT=1 cargo test -p kitty-core`.
 
-use kitty_core::{HarnessId, HarnessStatus, InstallState, LoginState, Scan, Version};
+use kitty_core::{
+    BlockKind, ErrorKind, HarnessId, HarnessStatus, InstallState, LoginState, RateLimitWindow,
+    Scan, StopReason, TranscriptEvent, Usage, Version,
+};
 use serde_json::json;
 
 fn contract_path() -> std::path::PathBuf {
@@ -62,6 +65,75 @@ fn login_states() -> Vec<LoginState> {
     ]
 }
 
+/// Every stop reason, so the UI can say why a turn ended.
+fn stop_reasons() -> Vec<StopReason> {
+    vec![
+        StopReason::EndTurn,
+        StopReason::MaxTokens,
+        StopReason::Refusal {
+            category: Some("cyber".into()),
+        },
+        StopReason::Cancelled,
+        StopReason::Interrupted,
+        StopReason::Failed {
+            message: "model unavailable".into(),
+        },
+        StopReason::Other {
+            reason: "somethingNew".into(),
+        },
+    ]
+}
+
+/// Every transcript event, which is the frontend's whole vocabulary.
+fn transcript_events() -> Vec<TranscriptEvent> {
+    vec![
+        TranscriptEvent::SessionReady {
+            model: Some("claude-opus-5".into()),
+        },
+        TranscriptEvent::BlockAppended {
+            seq: 1,
+            block_kind: BlockKind::Assistant,
+            text: String::new(),
+        },
+        TranscriptEvent::BlockDelta {
+            seq: 1,
+            text: " lovely".into(),
+        },
+        TranscriptEvent::BlockFinal {
+            seq: 1,
+            text: "Hello, lovely human.".into(),
+        },
+        TranscriptEvent::TurnEnded {
+            stop: StopReason::EndTurn,
+        },
+        TranscriptEvent::Usage(Usage {
+            input_tokens: 2,
+            output_tokens: 9,
+            cache_read_tokens: 15_445,
+            cache_write_tokens: 9_091,
+            reasoning_tokens: 0,
+        }),
+        TranscriptEvent::Context {
+            used: Some(16_325),
+            window: Some(258_400),
+        },
+        TranscriptEvent::RateLimits {
+            windows: vec![RateLimitWindow {
+                label: "five_hour".into(),
+                utilization: 0.14,
+                resets_at_ms: Some(1_789_462_200_000),
+            }],
+        },
+        TranscriptEvent::Status {
+            text: "compacting".into(),
+        },
+        TranscriptEvent::Failed {
+            error_kind: ErrorKind::Auth,
+            message: "not signed in".into(),
+        },
+    ]
+}
+
 fn sample_scan() -> Scan {
     Scan {
         harnesses: vec![
@@ -99,6 +171,9 @@ fn contract_matches_the_committed_file() {
         "harnessIds": HarnessId::ALL,
         "installStates": install_states(),
         "loginStates": login_states(),
+        "blockKinds": [BlockKind::User, BlockKind::Assistant, BlockKind::Reasoning],
+        "stopReasons": stop_reasons(),
+        "transcriptEvents": transcript_events(),
         "scan": sample_scan(),
     }))
     .expect("wire types must serialize")
@@ -138,6 +213,12 @@ fn every_variant_is_covered() {
     // deliberate update here too.
     assert_eq!(install_states().len(), 5, "add the new InstallState sample");
     assert_eq!(login_states().len(), 5, "add the new LoginState sample");
+    assert_eq!(stop_reasons().len(), 7, "add the new StopReason sample");
+    assert_eq!(
+        transcript_events().len(),
+        10,
+        "add the new TranscriptEvent sample"
+    );
     assert_eq!(
         HarnessId::ALL.len(),
         2,

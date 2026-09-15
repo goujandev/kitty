@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/core", "crates/probe", "crates/supervisor", "crates/harness", "crates/engine", "src-tauri"]
+members = ["crates/core", "crates/probe", "crates/supervisor", "crates/harness", "crates/engine", "crates/store", "src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,6 +15,7 @@ kitty-probe = { path = "crates/probe" }
 kitty-supervisor = { path = "crates/supervisor" }
 kitty-harness = { path = "crates/harness" }
 kitty-engine = { path = "crates/engine" }
+kitty-store = { path = "crates/store" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

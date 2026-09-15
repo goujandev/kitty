@@ -1,6 +1,7 @@
 :root {
   --bg: #0e0f12;
   --panel: #16181d;
+  --panel-2: #1b1e24;
   --panel-edge: #23262e;
   --text: #e7e9ee;
   --muted: #8c94a4;
@@ -30,22 +31,371 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  /* The window is dragged by its frame; text selection here is noise. */
   user-select: none;
+  overflow: hidden;
 }
 
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100%;
-  padding: 28px 28px 0;
+  height: 100%;
 }
 
-.app__foot {
-  margin-top: auto;
-  padding: 18px 0;
+/* ----------------------------------------------------------------- tabs */
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--panel-edge);
+  flex: none;
+}
+
+.tab {
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab--active {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.tabs__note {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* -------------------------------------------------------------- chat shell */
+
+.chat {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.chat__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ---------------------------------------------------------------- sidebar */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 236px;
+  border-right: 1px solid var(--panel-edge);
+  padding: 12px;
+  gap: 18px;
+  overflow: hidden;
+}
+
+.project {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.project:hover {
+  border-color: var(--accent);
+}
+
+.project__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.project__action {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sidebar__section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.sidebar__section--grow {
+  flex: 1;
+  min-height: 0;
+}
+
+.sidebar__heading {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.sidebar__note {
+  margin: 0;
+  font-size: 12px;
+}
+
+.starters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.starter {
+  padding: 5px 10px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.starter:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.starter:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.sessions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.session {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.session:hover {
+  background: var(--panel);
+}
+
+.session--active {
+  background: var(--panel-2);
+}
+
+.session__title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.session__meta {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* ------------------------------------------------------------- transcript */
+
+.transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 22px;
+}
+
+.transcript--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.transcript__spacer {
+  position: relative;
+  width: 100%;
+}
+
+.row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  padding-bottom: 12px;
+}
+
+.bubble {
+  max-width: 760px;
+  padding: 10px 13px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-edge);
+  background: var(--panel);
+}
+
+.bubble--user {
+  /* Narrower and right-aligned, so who said what is readable at a glance
+     rather than something you work out from the wording. */
+  max-width: 68%;
+  margin-left: auto;
+  background: #202632;
+  border-color: #2f3646;
+}
+
+.bubble--reasoning {
+  background: transparent;
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.bubble__label {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bubble__text {
+  /* Whitespace is content. Collapsing it here would undo the delta handling
+     underneath, which exists precisely to preserve it. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+/* ------------------------------------------------------------- status line */
+
+.statusline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  padding: 6px 22px;
+  border-top: 1px solid var(--panel-edge);
   color: var(--muted);
   font-size: 12px;
+}
+
+.statusline__state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.statusline__meta {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.spinner {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 2px solid var(--panel-edge);
+  border-top-color: var(--accent);
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------------------------------------------------------------- composer */
+
+.composer {
+  flex: none;
+  padding: 12px 22px 16px;
+  border-top: 1px solid var(--panel-edge);
+}
+
+.composer__box {
+  width: 100%;
+  min-height: 42px;
+  max-height: 33vh;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  resize: none;
+  user-select: text;
+}
+
+.composer__box:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.composer__box:disabled {
+  color: var(--muted);
+}
+
+.composer__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.composer__hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.button--stop {
+  border-color: var(--blocked);
+  color: var(--blocked);
+}
+
+/* --------------------------------------------------------- agents screen */
+
+.page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 28px;
 }
 
 .page__head {
@@ -255,10 +605,11 @@ body {
 }
 
 .banner {
-  margin: 0 0 14px;
+  margin: 12px 22px 0;
   padding: 10px 12px;
   border-radius: 8px;
   font-size: 13px;
+  flex: none;
 }
 
 .banner--error {
@@ -303,7 +654,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .skeleton {
+  .skeleton,
+  .spinner {
     animation: none;
   }
 }

@@ -11,7 +11,8 @@ mod status;
 mod version;
 
 pub use event::{
-    snapshot_remainder, DeltaMode, ErrorKind, RateLimitWindow, SessionEvent, StopReason, Usage,
+    snapshot_remainder, BlockKind, DeltaMode, ErrorKind, RateLimitWindow, SessionEvent, StopReason,
+    TranscriptEvent, Usage,
 };
 pub use harness::{HarnessDescriptor, HarnessId, CLAUDE, CODEX};
 pub use status::{HarnessStatus, Hint, InstallState, LoginState, Scan};

@@ -70,6 +70,39 @@ pub fn snapshot_remainder<'a>(streamed: &str, snapshot: &'a str) -> Option<&'a s
     Some(snapshot)
 }
 
+/// What a transcript is made of.
+///
+/// Slice 2 has three kinds. Tool activity joins them in slice 3, which is an
+/// added variant rather than a schema change, because `kind` is a string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BlockKind {
+    User,
+    Assistant,
+    Reasoning,
+}
+
+impl BlockKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Assistant => "assistant",
+            Self::Reasoning => "reasoning",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        match text {
+            "user" => Some(Self::User),
+            "assistant" => Some(Self::Assistant),
+            "reasoning" => Some(Self::Reasoning),
+            _ => None,
+        }
+    }
+}
+
 /// Why a turn stopped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -301,4 +334,58 @@ mod tests {
             assert_eq!(back, event, "round trip changed the event: {json}");
         }
     }
+}
+
+/// What the transcript view is told, after the host has done the bookkeeping.
+///
+/// [`SessionEvent`] is what a codec produces; this is what the frontend
+/// consumes. The difference is that block identity has already been resolved,
+/// so the UI only has to append text to a numbered row. Keeping that
+/// resolution in Rust is ADR-0003: the frontend renders, it does not decide
+/// what a transcript is.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum TranscriptEvent {
+    /// The CLI is up. Carries the model it actually chose.
+    SessionReady {
+        model: Option<String>,
+    },
+    /// A new row. `text` is whatever it starts with, usually empty.
+    BlockAppended {
+        seq: i64,
+        block_kind: BlockKind,
+        text: String,
+    },
+    /// Text to append to a row. Never a replacement.
+    BlockDelta {
+        seq: i64,
+        text: String,
+    },
+    /// The authoritative full text of a row that just finished.
+    BlockFinal {
+        seq: i64,
+        text: String,
+    },
+    TurnEnded {
+        stop: StopReason,
+    },
+    Usage(Usage),
+    Context {
+        used: Option<u64>,
+        window: Option<u64>,
+    },
+    RateLimits {
+        windows: Vec<RateLimitWindow>,
+    },
+    Status {
+        text: String,
+    },
+    Failed {
+        error_kind: ErrorKind,
+        message: String,
+    },
 }

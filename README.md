@@ -10,11 +10,15 @@ Windows only. See [ADR-0001](docs/adr/0001-stack-and-process-model.md).
 
 ## Status
 
-Slice 1 of the first prototype: **kitty sees your agents.** It finds Claude Code
-and Codex, identifies them by version, reports whether each is signed in, and
-tells you the exact command to fix anything that is not ready.
+Slices 1 and 2 of the first prototype are done.
 
-There is no chat yet. That is slice 2 (see [PROTOTYPE-1.md](docs/PROTOTYPE-1.md)).
+kitty finds Claude Code and Codex, reports whether each is signed in, and tells
+you the exact command to fix anything that is not ready. You can open a folder,
+start a session on either agent, and watch a reply stream in. Close the window
+and reopen it and the conversation is still there, on the same vendor session.
+
+Next: tools and approvals, then model pickers, then the project selector proper.
+See [PROTOTYPE-1.md](docs/PROTOTYPE-1.md).
 
 ## Running it
 
@@ -25,10 +29,11 @@ npm install
 npm start          # tauri dev
 ```
 
-Without the GUI, the same scan runs headless:
+Two headless tools run the same code paths without the GUI:
 
 ```bash
-cargo run -p kitty-probe --example probe
+cargo run -p kitty-probe  --example probe
+cargo run -p kitty-engine --example chat -- claude "Say hello in three words."
 ```
 
 ```text
