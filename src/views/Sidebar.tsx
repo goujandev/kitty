@@ -11,6 +11,7 @@ export function Sidebar({
   projectName,
   sessions,
   activeId,
+  draft,
   harnesses,
   onChooseProject,
   onNewSession,
@@ -19,6 +20,8 @@ export function Sidebar({
   projectName: string | null;
   sessions: SessionRow[];
   activeId: string | null;
+  /** An agent chosen but not yet spoken to. */
+  draft: HarnessId | null;
   harnesses: HarnessStatus[];
   onChooseProject: () => void;
   onNewSession: (harness: HarnessId) => void;
@@ -40,7 +43,7 @@ export function Sidebar({
             <button
               key={harness.id}
               type="button"
-              className="starter"
+              className={`starter ${draft === harness.id ? "starter--chosen" : ""}`}
               disabled={!harness.ready || projectName === null}
               title={harness.ready ? harness.label : harness.hint?.message}
               onClick={() => onNewSession(harness.id)}
@@ -58,10 +61,20 @@ export function Sidebar({
 
       <div className="sidebar__section sidebar__section--grow">
         <h2 className="sidebar__heading">Sessions</h2>
-        {sessions.length === 0 ? (
+        {sessions.length === 0 && draft === null ? (
           <p className="muted sidebar__note">Nothing here yet.</p>
         ) : (
           <ul className="sessions">
+            {draft !== null && (
+              <li>
+                {/* A draft is shown so the choice is visible, but it is not a
+                    session until something is sent. */}
+                <span className="session session--active session--draft">
+                  <span className="session__title">New conversation</span>
+                  <span className="session__meta">{draft} · unsent</span>
+                </span>
+              </li>
+            )}
             {sessions.map((session) => (
               <li key={session.id}>
                 <button

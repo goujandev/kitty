@@ -16,11 +16,14 @@
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "dompurify": "^3.4.15",
+    "marked": "^18.0.13",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@types/dompurify": "^3.0.5",
     "@types/node": "^26.5.1",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",

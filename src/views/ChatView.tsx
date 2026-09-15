@@ -4,9 +4,11 @@ import {
   chooseProject,
   newSession,
   openSession,
+  respondApproval,
   send,
   useChat,
 } from "../stores/chatStore";
+import { ApprovalPrompt } from "./ApprovalPrompt";
 import { Composer } from "./Composer";
 import { Sidebar } from "./Sidebar";
 import { Transcript } from "./Transcript";
@@ -22,6 +24,7 @@ export function ChatView(): React.ReactElement {
         projectName={chat.project?.name ?? null}
         sessions={chat.sessions}
         activeId={chat.activeId}
+        draft={chat.draft}
         harnesses={harnesses}
         onChooseProject={() => void chooseProject()}
         onNewSession={(harness) => void newSession(harness)}
@@ -35,7 +38,7 @@ export function ChatView(): React.ReactElement {
           </p>
         )}
 
-        {chat.activeId === null ? (
+        {chat.activeId === null && chat.draft === null ? (
           <Empty hasProject={chat.project !== null} />
         ) : (
           <Transcript blocks={chat.blocks} busy={chat.busy} />
@@ -43,9 +46,16 @@ export function ChatView(): React.ReactElement {
 
         <StatusLine />
 
+        {chat.approval && (
+          <ApprovalPrompt
+            approval={chat.approval}
+            onRespond={(allow) => void respondApproval(allow)}
+          />
+        )}
+
         <Composer
           busy={chat.busy}
-          disabled={chat.activeId === null}
+          disabled={chat.activeId === null && chat.draft === null}
           onSend={(text) => void send(text)}
           onCancel={() => void cancel()}
         />
@@ -84,7 +94,7 @@ function StatusLine(): React.ReactElement | null {
     }
   }
   for (const limit of limits) {
-    parts.push(`${limit.label.replace("_", " ")} ${percent(limit.utilization)}`);
+    parts.push(`${limit.label} ${percent(limit.utilization)}`);
   }
 
   if (!busy && !status && !notice && parts.length === 0) return null;

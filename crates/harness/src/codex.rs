@@ -27,10 +27,13 @@
 
 use std::collections::HashMap;
 
-use kitty_core::{ErrorKind, SessionEvent, StopReason, Usage};
+use kitty_core::{
+    ApprovalKind, ApprovalOutcome, ErrorKind, RateLimitWindow, SessionEvent, StopReason,
+    ToolStatus, Usage,
+};
 use serde_json::{json, Value};
 
-use crate::{str_field, u64_field, Codec, StartContext, Step};
+use crate::{first_line, short_path, str_field, u64_field, Codec, StartContext, Step};
 
 /// Argv after the resolved binary.
 #[must_use]
@@ -54,6 +57,11 @@ pub struct CodexCodec {
     turn_id: Option<String>,
     /// A prompt asked for before the thread was ready.
     queued_turn: Option<String>,
+    /// Pending permission requests, by the id we handed upwards, to the
+    /// JSON-RPC id the server is waiting on.
+    approvals: HashMap<String, u64>,
+    /// Tool items in flight, so a completion can be matched to its row.
+    tools: HashMap<String, String>,
     cwd: String,
     resume: Option<String>,
     model: Option<String>,
@@ -87,11 +95,11 @@ impl CodexCodec {
     fn open_thread(&mut self) -> String {
         let mut params = json!({
             "cwd": self.cwd,
-            // Slice 2 streams text and nothing else. A read-only sandbox with
-            // no approvals means a turn can never block on a prompt we have
-            // nowhere to show yet. Slice 3 widens this.
+            // Read-only plus on-request is what makes the CLI escalate to
+            // us rather than deciding alone. Widening the sandbox is a later
+            // per-session setting; asking is the safe default.
             "sandbox": "read-only",
-            "approvalPolicy": "never",
+            "approvalPolicy": "on-request",
         });
         if let Some(model) = &self.model {
             params["model"] = json!(model);
@@ -134,6 +142,24 @@ impl Codec for CodexCodec {
         Step::none()
     }
 
+    fn respond_approval(&mut self, id: &str, allow: bool) -> Step {
+        let Some(request_id) = self.approvals.remove(id) else {
+            // Already settled, or never ours. Answering twice would confuse
+            // the server far more than staying quiet.
+            return Step::none();
+        };
+
+        // `item/permissions/requestApproval` wants the permission set echoed
+        // back; the others take a decision. Declining is expressed the same
+        // way for both, so only the accept path differs.
+        let result = if allow {
+            json!({ "decision": "accept" })
+        } else {
+            json!({ "decision": "decline" })
+        };
+        Step::send(json!({ "id": request_id, "result": result }).to_string())
+    }
+
     fn cancel(&mut self) -> Step {
         let (Some(thread), Some(turn)) = (self.thread_id.clone(), self.turn_id.clone()) else {
             // Nothing running. Drop any prompt that never made it out, so it
@@ -161,9 +187,9 @@ impl Codec for CodexCodec {
             if msg.get("result").is_some() || msg.get("error").is_some() {
                 return self.on_response(id, &msg);
             }
-            // A server-initiated request. Approvals arrive this way and are
-            // slice 3's problem; the read-only sandbox means none should come.
-            return Step::none();
+            // A server-initiated request: it carries both an id and a
+            // method. Approvals arrive this way.
+            return self.on_server_request(id, &msg);
         }
 
         match str_field(&msg, "method") {
@@ -265,24 +291,31 @@ impl CodexCodec {
                 })
             }
 
-            "item/completed" => {
-                let item = params.get("item").unwrap_or(&Value::Null);
-                match str_field(item, "type") {
-                    Some("agentMessage") => {
-                        let text = str_field(item, "text").unwrap_or_default();
-                        if text.is_empty() {
-                            return Step::none();
-                        }
-                        Step::event(SessionEvent::MessageDone {
-                            text: text.to_owned(),
-                        })
-                    }
-                    Some("reasoning") => Step::event(SessionEvent::ReasoningDone),
-                    _ => Step::none(),
+            "item/started" => self.on_item(params, false),
+            "item/completed" => self.on_item(params, true),
+
+            "serverRequest/resolved" => {
+                // Someone else answered, or the turn ended first. A real third
+                // outcome, not a synonym for denied.
+                let id = format!(
+                    "codex-{}",
+                    params
+                        .get("requestId")
+                        .and_then(Value::as_u64)
+                        .unwrap_or_default()
+                );
+                if self.approvals.remove(&id).is_some() {
+                    return Step::event(SessionEvent::ApprovalResolved {
+                        id,
+                        outcome: ApprovalOutcome::Cancelled,
+                    });
                 }
+                Step::none()
             }
 
             "thread/tokenUsage/updated" => on_token_usage(params),
+
+            "account/rateLimits/updated" => on_rate_limits(params),
 
             "turn/completed" => {
                 self.turn_id = None;
@@ -312,6 +345,171 @@ impl CodexCodec {
 
             _ => Step::none(),
         }
+    }
+}
+
+impl CodexCodec {
+    /// A request the server is blocking on until we answer.
+    fn on_server_request(&mut self, request_id: u64, msg: &Value) -> Step {
+        let method = str_field(msg, "method").unwrap_or_default();
+        let params = msg.get("params").unwrap_or(&Value::Null);
+
+        let approval_kind = match method {
+            "item/fileChange/requestApproval" | "applyPatchApproval" => ApprovalKind::Edit,
+            "item/commandExecution/requestApproval" | "execCommandApproval" => {
+                ApprovalKind::Command
+            }
+            // A permissions request, and anything we do not recognise, still
+            // reaches the user. A request nobody answers stalls the turn, so
+            // an unknown one must never be silently dropped.
+            _ => ApprovalKind::Other,
+        };
+
+        let id = format!("codex-{request_id}");
+        self.approvals.insert(id.clone(), request_id);
+
+        // The request names an item rather than repeating its details, so the
+        // title comes from the row we already announced.
+        let title = str_field(params, "itemId")
+            .and_then(|item| self.tools.get(item).cloned())
+            .or_else(|| str_field(params, "command").map(|c| first_line(c, 80)))
+            .unwrap_or_else(|| match approval_kind {
+                ApprovalKind::Edit => "Edit files".to_owned(),
+                ApprovalKind::Command => "Run a command".to_owned(),
+                _ => "Continue".to_owned(),
+            });
+
+        Step::event(SessionEvent::ApprovalRequested {
+            id,
+            approval_kind,
+            title,
+            detail: str_field(params, "reason").map(|r| first_line(r, 200)),
+        })
+    }
+
+    /// Routes an item notification by what kind of item it is.
+    ///
+    /// Codex models everything as an item: text, reasoning and tool calls all
+    /// arrive through the same two notifications.
+    fn on_item(&mut self, params: &Value, finished: bool) -> Step {
+        let item = params.get("item").unwrap_or(&Value::Null);
+        let kind = str_field(item, "type").unwrap_or_default();
+
+        if is_tool_item(kind) {
+            return self.on_tool_item(item, finished);
+        }
+        if !finished {
+            return Step::none();
+        }
+
+        match kind {
+            "agentMessage" => {
+                let text = str_field(item, "text").unwrap_or_default();
+                if text.is_empty() {
+                    return Step::none();
+                }
+                Step::event(SessionEvent::MessageDone {
+                    text: text.to_owned(),
+                })
+            }
+            "reasoning" => Step::event(SessionEvent::ReasoningDone),
+            _ => Step::none(),
+        }
+    }
+
+    /// A tool item starting or finishing.
+    fn on_tool_item(&mut self, item: &Value, finished: bool) -> Step {
+        let Some(id) = str_field(item, "id") else {
+            return Step::none();
+        };
+        let kind = str_field(item, "type").unwrap_or_default();
+
+        if !finished {
+            let title = tool_title(kind, item);
+            self.tools.insert(id.to_owned(), title.clone());
+            return Step::event(SessionEvent::ToolStarted {
+                call_id: id.to_owned(),
+                name: kind.to_owned(),
+                title,
+            });
+        }
+
+        self.tools.remove(id);
+        let status = match str_field(item, "status") {
+            Some("declined" | "rejected") => ToolStatus::Denied,
+            Some("failed" | "error") => ToolStatus::Failed,
+            // "completed", and anything that finished without saying how.
+            // Absence of a status is not evidence of failure.
+            _ => ToolStatus::Ok,
+        };
+        Step::event(SessionEvent::ToolEnded {
+            call_id: id.to_owned(),
+            status,
+            detail: tool_detail(kind, item),
+        })
+    }
+}
+
+/// Every item type that represents work rather than words.
+fn is_tool_item(kind: &str) -> bool {
+    matches!(
+        kind,
+        "fileChange"
+            | "commandExecution"
+            | "mcpToolCall"
+            | "webSearch"
+            | "collabAgentToolCall"
+            | "subAgentActivity"
+    )
+}
+
+fn tool_title(kind: &str, item: &Value) -> String {
+    match kind {
+        "fileChange" => {
+            let changes = item.get("changes").and_then(Value::as_array);
+            let first = changes.and_then(|c| c.first());
+            let path = first.and_then(|c| str_field(c, "path"));
+            let verb = first
+                .and_then(|c| c.get("kind"))
+                .and_then(|k| str_field(k, "type"))
+                .map_or("Change", |t| match t {
+                    "add" => "Create",
+                    "delete" => "Delete",
+                    _ => "Edit",
+                });
+            let count = changes.map_or(0, Vec::len);
+            match (path, count) {
+                (Some(path), 1) => format!("{verb} {}", short_path(path)),
+                (Some(path), n) => format!("{verb} {} and {} more", short_path(path), n - 1),
+                _ => verb.to_owned(),
+            }
+        }
+        "commandExecution" => str_field(item, "command")
+            .map_or_else(|| "Run a command".to_owned(), |c| first_line(c, 80)),
+        "webSearch" => str_field(item, "query")
+            .map_or_else(|| "Web search".to_owned(), |q| format!("Search: {q}")),
+        "mcpToolCall" => {
+            let server = str_field(item, "server").unwrap_or("mcp");
+            let tool = str_field(item, "tool").unwrap_or("tool");
+            format!("{server}/{tool}")
+        }
+        other => other.to_owned(),
+    }
+}
+
+fn tool_detail(kind: &str, item: &Value) -> Option<String> {
+    match kind {
+        "commandExecution" => str_field(item, "aggregatedOutput")
+            .or_else(|| str_field(item, "output"))
+            .map(|o| first_line(o, 160)),
+        "fileChange" => {
+            let count = item
+                .get("changes")
+                .and_then(Value::as_array)
+                .map_or(0, Vec::len);
+            (count > 0).then(|| format!("{count} file{}", if count == 1 { "" } else { "s" }))
+        }
+        _ => None,
     }
 }
 
@@ -357,6 +555,49 @@ fn on_token_usage(params: &Value) -> Step {
         step.events.push(SessionEvent::Context { used, window });
     }
     step
+}
+
+/// Subscription usage, which Codex pushes unprompted like Claude does.
+///
+/// Windows are described by duration rather than name, so the label is derived
+/// from `windowDurationMins`: 10080 minutes is the weekly window.
+fn on_rate_limits(params: &Value) -> Step {
+    let Some(limits) = params.get("rateLimits") else {
+        return Step::none();
+    };
+
+    let windows: Vec<RateLimitWindow> = ["primary", "secondary"]
+        .into_iter()
+        .filter_map(|slot| limits.get(slot))
+        .filter(|value| !value.is_null())
+        .filter_map(|window| {
+            let used = u64_field(window, "usedPercent")?;
+            Some(RateLimitWindow {
+                label: window_label(u64_field(window, "windowDurationMins")),
+                #[allow(clippy::cast_precision_loss)]
+                utilization: used as f64 / 100.0,
+                resets_at_ms: window
+                    .get("resetsAt")
+                    .and_then(Value::as_i64)
+                    .and_then(|s| s.checked_mul(1000)),
+            })
+        })
+        .collect();
+
+    if windows.is_empty() {
+        return Step::none();
+    }
+    Step::event(SessionEvent::RateLimits { windows })
+}
+
+/// Turns a window duration into something short enough for a status line.
+fn window_label(minutes: Option<u64>) -> String {
+    match minutes {
+        Some(m) if m >= 1440 && m % 1440 == 0 => format!("{}d", m / 1440),
+        Some(m) if m >= 60 && m % 60 == 0 => format!("{}h", m / 60),
+        Some(m) => format!("{m}m"),
+        None => "usage".to_owned(),
+    }
 }
 
 #[must_use]
@@ -545,6 +786,50 @@ mod tests {
                 assert_eq!(usage.cache_read_tokens, 12032);
                 assert_eq!(*used, Some(16325));
                 assert_eq!(*window, Some(258_400));
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rate_limits_are_decoded_from_the_recorded_payload() {
+        // Previously not handled at all, which is why switching from Claude to
+        // Codex left Claude's numbers on screen.
+        let mut codec = CodexCodec::new();
+        let step = feed(
+            &mut codec,
+            json!({"method": "account/rateLimits/updated", "params": {"rateLimits": {
+                "limitId": "codex",
+                "primary": {"usedPercent": 22, "windowDurationMins": 10080,
+                            "resetsAt": 1_789_806_159},
+                "secondary": null,
+                "planType": "prolite"}}}),
+        );
+        match step.events.as_slice() {
+            [SessionEvent::RateLimits { windows }] => {
+                assert_eq!(windows.len(), 1, "a null window must not be reported");
+                assert_eq!(windows[0].label, "7d");
+                assert!((windows[0].utilization - 0.22).abs() < f64::EPSILON);
+                assert_eq!(windows[0].resets_at_ms, Some(1_789_806_159_000));
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn both_rate_limit_windows_are_reported_when_present() {
+        let mut codec = CodexCodec::new();
+        let step = feed(
+            &mut codec,
+            json!({"method": "account/rateLimits/updated", "params": {"rateLimits": {
+                "primary": {"usedPercent": 5, "windowDurationMins": 300},
+                "secondary": {"usedPercent": 40, "windowDurationMins": 10080}}}}),
+        );
+        match step.events.as_slice() {
+            [SessionEvent::RateLimits { windows }] => {
+                assert_eq!(windows.len(), 2);
+                assert_eq!(windows[0].label, "5h");
+                assert_eq!(windows[1].label, "7d");
             }
             other => panic!("unexpected events: {other:?}"),
         }

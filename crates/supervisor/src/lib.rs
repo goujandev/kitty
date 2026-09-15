@@ -164,6 +164,20 @@ impl std::error::Error for SpawnError {}
 
 /// Starts a child, contains it in a job, and begins pumping its pipes.
 pub fn spawn(spec: &SpawnSpec) -> Result<Child, SpawnError> {
+    // A batch file is launched through `cmd.exe`, which exists whether or not
+    // the script does. Without this check a missing CLI looks like a child
+    // that started and immediately died, which is a far worse error message.
+    if spec
+        .program
+        .parent()
+        .is_some_and(|p| !p.as_os_str().is_empty())
+        && !spec.program.is_file()
+    {
+        return Err(SpawnError::Spawn {
+            message: format!("{} does not exist", spec.program.display()),
+        });
+    }
+
     let job = Job::new().map_err(|e| SpawnError::Job {
         message: format!("could not create a job object: {e}"),
     })?;

@@ -79,6 +79,8 @@ pub struct Block {
     pub seq: i64,
     pub kind: BlockKind,
     pub text: String,
+    /// JSON detail for rows that need more than a line, i.e. tool activity.
+    pub meta: Option<String>,
     pub created_at: i64,
 }
 
@@ -325,6 +327,17 @@ impl Store {
         })
     }
 
+    /// Attaches or replaces a block's structured detail.
+    pub fn set_block_meta(&self, session_id: &str, seq: i64, meta: &str) -> Result<()> {
+        self.write(|conn| {
+            conn.execute(
+                "UPDATE blocks SET meta = ?3 WHERE session_id = ?1 AND seq = ?2",
+                params![session_id, seq, meta],
+            )?;
+            Ok(())
+        })
+    }
+
     /// Replaces a block's text. One row, whatever the transcript's size.
     pub fn set_block_text(&self, session_id: &str, seq: i64, text: &str) -> Result<()> {
         self.write(|conn| {
@@ -362,10 +375,44 @@ impl Store {
         })
     }
 
+    /// Deletes a session and everything under it.
+    ///
+    /// Blocks cascade, but `blocks_fts` is a virtual table with no foreign
+    /// key, so its rows are removed explicitly. Forgetting that is how a
+    /// search index starts returning hits for conversations that are gone.
+    pub fn delete_session(&self, session_id: &str) -> Result<()> {
+        self.write(|conn| {
+            conn.execute(
+                "DELETE FROM blocks_fts WHERE session_id = ?1",
+                params![session_id],
+            )?;
+            conn.execute("DELETE FROM sessions WHERE id = ?1", params![session_id])?;
+            Ok(())
+        })
+    }
+
+    /// Removes sessions that were opened but never used.
+    ///
+    /// Picking an agent should not commit you to a conversation. The UI keeps
+    /// an unsent session as a draft and only creates a row when you send, but
+    /// this cleans up rows created before that, and any left by a crash
+    /// between creating a session and sending to it.
+    pub fn prune_empty_sessions(&self, project_id: &str) -> Result<usize> {
+        self.write(|conn| {
+            let removed = conn.execute(
+                "DELETE FROM sessions
+                 WHERE project_id = ?1
+                   AND id NOT IN (SELECT DISTINCT session_id FROM blocks)",
+                params![project_id],
+            )?;
+            Ok(removed)
+        })
+    }
+
     pub fn blocks(&self, session_id: &str) -> Result<Vec<Block>> {
         self.read(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT seq, kind, text, created_at FROM blocks
+                "SELECT seq, kind, text, meta, created_at FROM blocks
                  WHERE session_id = ?1 ORDER BY seq",
             )?;
             let rows = stmt
@@ -375,7 +422,8 @@ impl Store {
                         seq: row.get(0)?,
                         kind: BlockKind::parse(&kind).unwrap_or(BlockKind::Assistant),
                         text: row.get(2)?,
-                        created_at: row.get(3)?,
+                        meta: row.get(3)?,
+                        created_at: row.get(4)?,
                     })
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;

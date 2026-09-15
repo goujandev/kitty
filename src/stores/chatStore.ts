@@ -15,6 +15,7 @@ import { useSyncExternalStore } from "react";
 
 import {
   assertNever,
+  type ApprovalKind,
   type Block,
   type HarnessId,
   type Project,
@@ -27,10 +28,27 @@ import {
 } from "../ipc/bindings";
 import * as ipc from "../ipc/commands";
 
+export type { ApprovalKind } from "../ipc/bindings";
+
+/** A permission request waiting on the user. */
+export interface PendingApproval {
+  id: string;
+  approvalKind: ApprovalKind;
+  title: string;
+  detail: string | null;
+}
+
 export interface ChatState {
   project: Project | null;
   sessions: SessionRow[];
   activeId: string | null;
+  /**
+   * An agent chosen but not yet spoken to.
+   *
+   * Picking an agent should not commit you to a conversation, so no session
+   * exists until the first message is sent. Before that it is only a draft.
+   */
+  draft: HarnessId | null;
   /** Transcript of the active session, in order. */
   blocks: Block[];
   /** A turn is in flight. */
@@ -42,6 +60,11 @@ export interface ChatState {
   usage: Usage | null;
   context: { used: number | null; window: number | null } | null;
   limits: RateLimitWindow[];
+  /**
+   * The agent is asking permission. The turn is stalled until this is
+   * answered, so it is shown prominently rather than as a notification.
+   */
+  approval: PendingApproval | null;
   error: string | null;
   loading: boolean;
 }
@@ -50,6 +73,7 @@ const EMPTY: ChatState = {
   project: null,
   sessions: [],
   activeId: null,
+  draft: null,
   blocks: [],
   busy: false,
   status: null,
@@ -57,6 +81,7 @@ const EMPTY: ChatState = {
   usage: null,
   context: null,
   limits: [],
+  approval: null,
   error: null,
   loading: false,
 };
@@ -113,35 +138,64 @@ export async function restoreLastProject(): Promise<void> {
 }
 
 async function useProject(project: Project): Promise<void> {
-  set({ project, error: null, sessions: [], activeId: null, blocks: [] });
+  set({
+    project,
+    error: null,
+    sessions: [],
+    activeId: null,
+    draft: null,
+    blocks: [],
+    limits: [],
+    usage: null,
+    context: null,
+    approval: null,
+  });
+  // Tidy before listing, so abandoned sessions never appear at all.
+  await ipc.pruneSessions(project.id).catch(() => 0);
   const sessions = await ipc.listSessions(project.id);
   set({ sessions });
   const first = sessions[0];
   if (first) await openSession(first.id);
 }
 
-export async function newSession(harness: HarnessId): Promise<void> {
-  const { project } = state;
-  if (!project) return;
-  try {
-    const session = await ipc.createSession(project.id, harness);
-    set({ sessions: [session, ...state.sessions] });
-    await openSession(session.id);
-  } catch (error) {
-    set({ error: message(error) });
-  }
-}
-
-/** Switches to a session, reloading its transcript from the database. */
-export async function openSession(sessionId: string): Promise<void> {
+/**
+ * Chooses an agent for a conversation that does not exist yet.
+ *
+ * Nothing is written until the first message, so clicking through the agents
+ * leaves no empty sessions behind.
+ */
+export function newSession(harness: HarnessId): void {
+  if (!state.project) return;
   set({
-    activeId: sessionId,
+    draft: harness,
+    activeId: null,
     blocks: [],
     busy: false,
     status: null,
     notice: null,
     usage: null,
     context: null,
+    limits: [],
+    approval: null,
+    error: null,
+  });
+}
+
+/** Switches to a session, reloading its transcript from the database. */
+export async function openSession(sessionId: string): Promise<void> {
+  set({
+    activeId: sessionId,
+    draft: null,
+    blocks: [],
+    busy: false,
+    status: null,
+    notice: null,
+    usage: null,
+    context: null,
+    // Usage windows belong to whichever agent is speaking. Carrying Claude's
+    // numbers into a Codex session is worse than showing none.
+    limits: [],
+    approval: null,
     error: null,
     loading: true,
   });
@@ -161,20 +215,28 @@ export async function openSession(sessionId: string): Promise<void> {
 }
 
 export async function send(text: string): Promise<void> {
-  const { activeId } = state;
-  if (!activeId || state.busy) return;
+  if (state.busy) return;
 
   const trimmed = text.trimEnd();
   if (!trimmed) return;
 
   set({ busy: true, notice: null, error: null, status: null });
   try {
-    const seq = await ipc.sendTurn(activeId, trimmed);
+    // A draft becomes a real session here, on the first message and not
+    // before.
+    const sessionId = state.activeId ?? (await commitDraft());
+    if (!sessionId) {
+      set({ busy: false });
+      return;
+    }
+
+    const seq = await ipc.sendTurn(sessionId, trimmed);
     // Show it immediately rather than waiting for a round trip.
     appendLocalBlock({
       seq,
       kind: "user",
       text: trimmed,
+      meta: null,
       createdAt: Date.now(),
     });
     // The title is derived from the first message, so refresh the list.
@@ -182,6 +244,21 @@ export async function send(text: string): Promise<void> {
   } catch (error) {
     set({ busy: false, error: message(error) });
   }
+}
+
+/** Turns the chosen agent into a real session. Returns its id. */
+async function commitDraft(): Promise<string | null> {
+  const { project, draft } = state;
+  if (!project || !draft) return null;
+
+  const session = await ipc.createSession(project.id, draft);
+  set({
+    activeId: session.id,
+    draft: null,
+    sessions: [session, ...state.sessions],
+  });
+  await ipc.startSession(session.id);
+  return session.id;
 }
 
 export async function cancel(): Promise<void> {
@@ -209,6 +286,21 @@ function appendLocalBlock(block: Block): void {
   set({ blocks: [...state.blocks, block] });
 }
 
+/** Answers the permission request on screen. */
+export async function respondApproval(allow: boolean): Promise<void> {
+  const { activeId, approval } = state;
+  if (!activeId || !approval) return;
+
+  // Clear it immediately. The confirmation comes back as an event, but the
+  // button should not stay live while that round-trips.
+  set({ approval: null });
+  try {
+    await ipc.respondApproval(activeId, approval.id, allow);
+  } catch (error) {
+    set({ error: message(error) });
+  }
+}
+
 /** Replaces one block, leaving every other block's identity untouched. */
 function replaceBlock(seq: number, update: (block: Block) => Block): void {
   let changed = false;
@@ -232,6 +324,7 @@ function apply(event: TranscriptEvent): void {
         seq: event.seq,
         kind: event.blockKind,
         text: event.text,
+        meta: null,
         createdAt: Date.now(),
       });
       return;
@@ -247,8 +340,37 @@ function apply(event: TranscriptEvent): void {
       replaceBlock(event.seq, (block) => ({ ...block, text: event.text }));
       return;
 
+    case "toolStatusChanged":
+      replaceBlock(event.seq, (block) => ({
+        ...block,
+        meta: JSON.stringify({ status: event.status, detail: event.detail }),
+      }));
+      return;
+
+    case "approvalRequested":
+      set({
+        approval: {
+          id: event.id,
+          approvalKind: event.approvalKind,
+          title: event.title,
+          detail: event.detail,
+        },
+      });
+      return;
+
+    case "approvalResolved":
+      // Only clear it if it is the one on screen. A late resolution for an
+      // older request must not dismiss a newer question.
+      if (state.approval?.id === event.id) set({ approval: null });
+      return;
+
     case "turnEnded":
-      set({ busy: false, status: null, notice: describeStop(event.stop) });
+      set({
+        busy: false,
+        status: null,
+        approval: null,
+        notice: describeStop(event.stop),
+      });
       void refreshSessions();
       return;
 
@@ -277,7 +399,7 @@ function apply(event: TranscriptEvent): void {
       return;
 
     case "failed":
-      set({ busy: false, error: event.message });
+      set({ busy: false, approval: null, error: event.message });
       return;
 
     default:

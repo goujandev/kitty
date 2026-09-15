@@ -80,6 +80,8 @@ pub enum BlockKind {
     User,
     Assistant,
     Reasoning,
+    /// Something the agent did: an edit, a command, a search.
+    Tool,
 }
 
 impl BlockKind {
@@ -89,6 +91,7 @@ impl BlockKind {
             Self::User => "user",
             Self::Assistant => "assistant",
             Self::Reasoning => "reasoning",
+            Self::Tool => "tool",
         }
     }
 
@@ -98,9 +101,48 @@ impl BlockKind {
             "user" => Some(Self::User),
             "assistant" => Some(Self::Assistant),
             "reasoning" => Some(Self::Reasoning),
+            "tool" => Some(Self::Tool),
             _ => None,
         }
     }
+}
+
+/// How a tool call ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolStatus {
+    Running,
+    Ok,
+    Failed,
+    /// The user said no, or the turn was cancelled before it ran.
+    Denied,
+}
+
+/// What an agent is asking permission to do.
+///
+/// Coarse on purpose. The UI uses it to pick an icon and a verb; the detail
+/// that matters is in the title, which comes from the harness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApprovalKind {
+    /// Write to a file.
+    Edit,
+    /// Run a command.
+    Command,
+    /// Reach the network.
+    Network,
+    Other,
+}
+
+/// How a permission request was settled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApprovalOutcome {
+    Allowed,
+    Denied,
+    /// Resolved without us: the harness decided, or the turn ended first.
+    /// A real third case, not a synonym for denied (ADR-0002).
+    Cancelled,
 }
 
 /// Why a turn stopped.
@@ -202,6 +244,37 @@ pub enum SessionEvent {
         text: String,
     },
     ReasoningDone,
+
+    /// The agent began doing something.
+    ToolStarted {
+        call_id: String,
+        /// The harness's own name for it, e.g. `Write`, `fileChange`.
+        name: String,
+        /// One line a human can read, e.g. `Write src/main.rs`.
+        title: String,
+    },
+    /// That work finished.
+    ToolEnded {
+        call_id: String,
+        status: ToolStatus,
+        /// Result or error, trimmed for display.
+        detail: Option<String>,
+    },
+
+    /// The agent wants permission. Nothing proceeds until this is answered.
+    ApprovalRequested {
+        /// Opaque above the codec, which maps it back to the vendor's id.
+        id: String,
+        approval_kind: ApprovalKind,
+        title: String,
+        detail: Option<String>,
+    },
+    /// The request is settled, by us or otherwise.
+    ApprovalResolved {
+        id: String,
+        outcome: ApprovalOutcome,
+    },
+
     /// Context-window level after the harness's latest request.
     Context {
         used: Option<u64>,
@@ -369,6 +442,24 @@ pub enum TranscriptEvent {
     BlockFinal {
         seq: i64,
         text: String,
+    },
+    /// A tool row's outcome changed. The row itself arrived as a block.
+    ToolStatusChanged {
+        seq: i64,
+        status: ToolStatus,
+        detail: Option<String>,
+    },
+    /// Show a permission prompt. The turn is stalled until it is answered.
+    ApprovalRequested {
+        id: String,
+        approval_kind: ApprovalKind,
+        title: String,
+        detail: Option<String>,
+    },
+    /// Take the prompt away.
+    ApprovalResolved {
+        id: String,
+        outcome: ApprovalOutcome,
     },
     TurnEnded {
         stop: StopReason,

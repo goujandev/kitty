@@ -18,10 +18,11 @@ pub struct Migration {
 }
 
 /// Every migration, in order. Append only.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "initial",
-    sql: r"
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: 1,
+        name: "initial",
+        sql: r"
 CREATE TABLE projects (
     id             TEXT PRIMARY KEY,
     root           TEXT NOT NULL UNIQUE,
@@ -85,7 +86,18 @@ CREATE VIRTUAL TABLE blocks_fts USING fts5(
     tokenize = 'unicode61'
 );
 ",
-}];
+    },
+    Migration {
+        version: 2,
+        name: "block_meta",
+        sql: r"
+-- Tool rows need more than a line of text: what ran, how it ended, and what
+-- it produced. Kept as JSON in one column rather than a table, because the
+-- shape is the harness's and will change with it.
+ALTER TABLE blocks ADD COLUMN meta TEXT;
+",
+    },
+];
 
 /// Applies anything not yet recorded. Safe to call on every open.
 pub fn migrate(conn: &Connection) -> Result<()> {
@@ -152,7 +164,7 @@ mod tests {
     /// expected value deliberately.
     #[test]
     fn released_migrations_are_immutable() {
-        let expected: &[(i64, u64)] = &[(1, 0xfad9_77ac_286d_e926)];
+        let expected: &[(i64, u64)] = &[(1, 0xfad9_77ac_286d_e926), (2, 0xef7a_aac6_fcfc_d9e1)];
 
         assert_eq!(
             MIGRATIONS.len(),

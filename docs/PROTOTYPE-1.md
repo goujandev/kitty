@@ -104,6 +104,16 @@ parking, orphan reaping, the protocol log viewer.
 does not. The two CLIs handle approvals completely differently, so if one
 engine can serve both, the abstraction is real.
 
+**Status: done.** Tool activity and permission prompts work on both harnesses,
+recorded to `fixtures/*/tools.jsonl` and replayed in tests. The bet held: the
+approval queue lives once in the engine, and the codecs only translate. Claude
+asks over a `control_request` on its own stream; Codex asks with a
+server-initiated JSON-RPC call. Neither codec tracks what is outstanding.
+
+The engine now has tests that need no real agent, driven by a fake CLI that
+replays canned frames: turn lifecycle, a mid-turn death, garbage on the wire,
+a tool round-trip, answering a request, and cancelling with one outstanding.
+
 ### S4 — you can choose
 
 **What you can do:** switch harness and model per session. The model list comes

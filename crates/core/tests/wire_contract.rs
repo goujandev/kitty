@@ -11,8 +11,8 @@
 //! To accept an intentional change: `UPDATE_CONTRACT=1 cargo test -p kitty-core`.
 
 use kitty_core::{
-    BlockKind, ErrorKind, HarnessId, HarnessStatus, InstallState, LoginState, RateLimitWindow,
-    Scan, StopReason, TranscriptEvent, Usage, Version,
+    ApprovalKind, ApprovalOutcome, BlockKind, ErrorKind, HarnessId, HarnessStatus, InstallState,
+    LoginState, RateLimitWindow, Scan, StopReason, ToolStatus, TranscriptEvent, Usage, Version,
 };
 use serde_json::json;
 
@@ -103,6 +103,21 @@ fn transcript_events() -> Vec<TranscriptEvent> {
             seq: 1,
             text: "Hello, lovely human.".into(),
         },
+        TranscriptEvent::ToolStatusChanged {
+            seq: 2,
+            status: ToolStatus::Ok,
+            detail: Some("1 file".into()),
+        },
+        TranscriptEvent::ApprovalRequested {
+            id: "codex-0".into(),
+            approval_kind: ApprovalKind::Edit,
+            title: "Create kitty/scratch.txt".into(),
+            detail: Some("the sandbox is read-only".into()),
+        },
+        TranscriptEvent::ApprovalResolved {
+            id: "codex-0".into(),
+            outcome: ApprovalOutcome::Allowed,
+        },
         TranscriptEvent::TurnEnded {
             stop: StopReason::EndTurn,
         },
@@ -171,7 +186,29 @@ fn contract_matches_the_committed_file() {
         "harnessIds": HarnessId::ALL,
         "installStates": install_states(),
         "loginStates": login_states(),
-        "blockKinds": [BlockKind::User, BlockKind::Assistant, BlockKind::Reasoning],
+        "blockKinds": [
+            BlockKind::User,
+            BlockKind::Assistant,
+            BlockKind::Reasoning,
+            BlockKind::Tool,
+        ],
+        "toolStatuses": [
+            ToolStatus::Running,
+            ToolStatus::Ok,
+            ToolStatus::Failed,
+            ToolStatus::Denied,
+        ],
+        "approvalKinds": [
+            ApprovalKind::Edit,
+            ApprovalKind::Command,
+            ApprovalKind::Network,
+            ApprovalKind::Other,
+        ],
+        "approvalOutcomes": [
+            ApprovalOutcome::Allowed,
+            ApprovalOutcome::Denied,
+            ApprovalOutcome::Cancelled,
+        ],
         "stopReasons": stop_reasons(),
         "transcriptEvents": transcript_events(),
         "scan": sample_scan(),
@@ -216,7 +253,7 @@ fn every_variant_is_covered() {
     assert_eq!(stop_reasons().len(), 7, "add the new StopReason sample");
     assert_eq!(
         transcript_events().len(),
-        10,
+        13,
         "add the new TranscriptEvent sample"
     );
     assert_eq!(

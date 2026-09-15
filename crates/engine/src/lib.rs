@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
-use kitty_core::{ErrorKind, HarnessId, SessionEvent, StopReason};
+use kitty_core::{ApprovalOutcome, ErrorKind, HarnessId, SessionEvent, StopReason};
 use kitty_harness::{codec_for, launch_args, Codec, StartContext};
 use kitty_supervisor::{spawn, Child, ChildEvent, Frame, SpawnSpec};
 
@@ -54,6 +54,7 @@ pub struct Session {
 
 enum Command {
     Turn(String),
+    Approve { id: String, allow: bool },
     Cancel,
     Shutdown,
 }
@@ -133,6 +134,7 @@ impl Session {
                 busy: false,
                 queued: Vec::new(),
                 cancelling: false,
+                pending: Vec::new(),
             }
             .run(&ctx, &incoming_rx);
         });
@@ -157,6 +159,20 @@ impl Session {
     #[must_use]
     pub fn send(&self, text: impl Into<String>) -> bool {
         self.commands.send(Command::Turn(text.into())).is_ok()
+    }
+
+    /// Answers a permission request.
+    ///
+    /// Returns false once the session has shut down. Answering one that is
+    /// already settled is harmless: the codec drops it.
+    #[must_use]
+    pub fn respond(&self, id: impl Into<String>, allow: bool) -> bool {
+        self.commands
+            .send(Command::Approve {
+                id: id.into(),
+                allow,
+            })
+            .is_ok()
     }
 
     /// Stops the running turn in-band, and drops anything queued behind it.
@@ -197,6 +213,12 @@ struct Pump {
     queued: Vec<String>,
     /// A cancel was sent and we are waiting for the CLI to confirm.
     cancelling: bool,
+    /// Permission requests the user has not answered yet.
+    ///
+    /// Tracked here rather than in a codec because every harness has them and
+    /// the rules are the same: a cancel denies them, and a turn ending
+    /// abandons them (ADR-0002).
+    pending: Vec<String>,
 }
 
 impl Pump {
@@ -254,10 +276,33 @@ impl Pump {
                     }
                 }
 
+                Incoming::Command(Command::Approve { id, allow }) => {
+                    let step = self.codec.respond_approval(&id, allow);
+                    self.dispatch(step);
+                    self.settle(
+                        &id,
+                        if allow {
+                            ApprovalOutcome::Allowed
+                        } else {
+                            ApprovalOutcome::Denied
+                        },
+                    );
+                }
+
                 Incoming::Command(Command::Cancel) => {
                     // Drop anything queued first, so a cancel cannot be
                     // followed by a prompt the user thought they had stopped.
                     self.queued.clear();
+                    // Anything waiting on the user is denied, because leaving
+                    // a request unanswered would hold the CLI open forever.
+                    for id in std::mem::take(&mut self.pending) {
+                        let step = self.codec.respond_approval(&id, false);
+                        self.dispatch(step);
+                        self.emit(SessionEvent::ApprovalResolved {
+                            id,
+                            outcome: ApprovalOutcome::Denied,
+                        });
+                    }
                     if self.busy && !self.cancelling {
                         self.cancelling = true;
                         let step = self.codec.cancel();
@@ -297,6 +342,20 @@ impl Pump {
         }
 
         for event in step.events {
+            // Approval bookkeeping happens here so a codec never has to track
+            // what is outstanding.
+            match &event {
+                SessionEvent::ApprovalRequested { id, .. } => {
+                    if !self.pending.contains(id) {
+                        self.pending.push(id.clone());
+                    }
+                }
+                SessionEvent::ApprovalResolved { id, .. } => {
+                    self.pending.retain(|p| p != id);
+                }
+                _ => {}
+            }
+
             let ends_turn = matches!(event, SessionEvent::TurnEnded { .. });
             self.emit(event);
             if ends_turn {
@@ -305,9 +364,27 @@ impl Pump {
         }
     }
 
+    /// Records that a request is settled and tells the consumer.
+    fn settle(&mut self, id: &str, outcome: ApprovalOutcome) {
+        if let Some(at) = self.pending.iter().position(|p| p == id) {
+            self.pending.remove(at);
+            self.emit(SessionEvent::ApprovalResolved {
+                id: id.to_owned(),
+                outcome,
+            });
+        }
+    }
+
     fn finish_turn(&mut self) {
         self.busy = false;
         self.cancelling = false;
+        // A turn cannot end with a question still on screen.
+        for id in std::mem::take(&mut self.pending) {
+            self.emit(SessionEvent::ApprovalResolved {
+                id,
+                outcome: ApprovalOutcome::Cancelled,
+            });
+        }
         if !self.queued.is_empty() {
             let next = self.queued.remove(0);
             self.begin(&next);

@@ -664,3 +664,239 @@ body {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+.starter--chosen {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.session--draft {
+  display: block;
+  cursor: default;
+  opacity: 0.85;
+}
+
+/* ---------------------------------------------------------------- markdown */
+
+.markdown {
+  user-select: text;
+}
+
+.markdown > :first-child {
+  margin-top: 0;
+}
+
+.markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown p,
+.markdown ul,
+.markdown ol,
+.markdown blockquote,
+.markdown table {
+  margin: 0 0 10px;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4 {
+  margin: 16px 0 8px;
+  font-size: 15px;
+  font-weight: 640;
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: 22px;
+}
+
+.markdown li {
+  margin: 3px 0;
+}
+
+.markdown code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #0f1115;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.markdown pre {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background: #0f1115;
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  padding: 0;
+  background: none;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.markdown blockquote {
+  padding-left: 12px;
+  border-left: 2px solid var(--panel-edge);
+  color: var(--muted);
+}
+
+.markdown a {
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.markdown th,
+.markdown td {
+  padding: 5px 10px;
+  border: 1px solid var(--panel-edge);
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--panel-2);
+  font-weight: 620;
+}
+
+.markdown hr {
+  margin: 14px 0;
+  border: 0;
+  border-top: 1px solid var(--panel-edge);
+}
+
+/* -------------------------------------------------------------- tool rows */
+
+.tool {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  max-width: 760px;
+  padding: 5px 13px;
+  border-left: 2px solid var(--panel-edge);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tool__mark {
+  flex: none;
+  width: 12px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.tool__title {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.tool__detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.tool--running {
+  border-left-color: var(--accent);
+}
+
+.tool--running .tool__mark {
+  color: var(--accent);
+}
+
+.tool--ok {
+  border-left-color: var(--ready);
+}
+
+.tool--ok .tool__mark {
+  color: var(--ready);
+}
+
+.tool--failed {
+  border-left-color: var(--danger);
+}
+
+.tool--failed .tool__mark {
+  color: var(--danger);
+}
+
+.tool--denied .tool__mark {
+  color: var(--blocked);
+}
+
+/* --------------------------------------------------------------- approval */
+
+.approval {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: none;
+  margin: 0 22px;
+  padding: 10px 14px;
+  border: 1px solid var(--blocked);
+  border-radius: 9px;
+  background: rgba(240, 179, 126, 0.08);
+}
+
+.approval__body {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
+}
+
+.approval__kind {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(240, 179, 126, 0.16);
+  color: var(--blocked);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.approval__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  user-select: text;
+}
+
+.approval__detail {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.approval__actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+  flex: none;
+}
+
+.button--allow {
+  border-color: var(--ready);
+  color: var(--ready);
+}
+
+.button--deny {
+  border-color: var(--panel-edge);
+}

@@ -1975,6 +1975,7 @@ dependencies = [
  "kitty-probe",
  "kitty-store",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -1997,6 +1998,7 @@ dependencies = [
  "kitty-harness",
  "kitty-probe",
  "kitty-supervisor",
+ "tempfile",
 ]
 
 [[package]]

@@ -16,3 +16,4 @@ kitty-supervisor = { workspace = true }
 
 [dev-dependencies]
 kitty-probe = { workspace = true }
+tempfile = "3"

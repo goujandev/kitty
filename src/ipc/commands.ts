@@ -51,6 +51,11 @@ export function listProjects(): Promise<Project[]> {
   return invoke<Project[]>("list_projects");
 }
 
+/** Drops sessions that were opened and never used. Returns how many. */
+export function pruneSessions(projectId: string): Promise<number> {
+  return invoke<number>("prune_sessions", { projectId });
+}
+
 // --------------------------------------------------------------- sessions
 
 export function listSessions(projectId: string): Promise<SessionRow[]> {
@@ -76,6 +81,15 @@ export function startSession(sessionId: string): Promise<void> {
 /** Sends a turn. Resolves with the sequence number of the user's block. */
 export function sendTurn(sessionId: string, text: string): Promise<number> {
   return invoke<number>("send_turn", { sessionId, text });
+}
+
+/** Answers a permission request. */
+export function respondApproval(
+  sessionId: string,
+  id: string,
+  allow: boolean,
+): Promise<void> {
+  return invoke<void>("respond_approval", { sessionId, id, allow });
 }
 
 export function cancelTurn(sessionId: string): Promise<void> {

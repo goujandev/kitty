@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import type { Block } from "../ipc/bindings";
+import { toolMeta, type Block, type ToolStatus } from "../ipc/bindings";
+import { Markdown, openLinksExternally } from "./Markdown";
 
 /**
  * The transcript, virtualised from its first commit (ADR-0006).
@@ -28,6 +29,19 @@ export function Transcript({
   blocks: Block[];
   busy: boolean;
 }): React.ReactElement {
+  // While a turn runs, the last agent block is the one being written to. It
+  // stays plain text until it finishes; see Markdown.tsx for why.
+  const streamingSeq = useMemo(() => {
+    if (!busy) return null;
+    for (let i = blocks.length - 1; i >= 0; i -= 1) {
+      const block = blocks[i];
+      if (block && (block.kind === "assistant" || block.kind === "reasoning")) {
+        return block.seq;
+      }
+    }
+    return null;
+  }, [blocks, busy]);
+
   const scroller = useRef<HTMLDivElement>(null);
   const heights = useRef(new Map<number, number>());
   const stick = useRef(true);
@@ -118,6 +132,7 @@ export function Transcript({
             key={block.seq}
             block={block}
             top={offsets[first + index] ?? 0}
+            streaming={block.seq === streamingSeq}
             onMeasure={measure}
           />
         ))}
@@ -135,10 +150,13 @@ export function Transcript({
 const Row = memo(function Row({
   block,
   top,
+  streaming,
   onMeasure,
 }: {
   block: Block;
   top: number;
+  /** Still being written to, so render it as plain text. */
+  streaming: boolean;
   onMeasure: (seq: number, height: number) => void;
 }): React.ReactElement {
   const node = useRef<HTMLDivElement>(null);
@@ -154,15 +172,59 @@ const Row = memo(function Row({
     return () => observer.disconnect();
   }, [block.seq, onMeasure]);
 
+  // Tool activity is a compact line, not a bubble. It is what the agent did,
+  // not what it said, and giving it the same weight as prose makes a
+  // transcript unreadable.
+  if (block.kind === "tool") {
+    const { status, detail } = toolMeta(block);
+    return (
+      <div className="row" style={{ top }} ref={node}>
+        <div className={`tool tool--${status}`}>
+          <span className="tool__mark" aria-hidden="true">
+            {statusMark(status)}
+          </span>
+          <span className="tool__title">{block.text}</span>
+          {detail && <span className="tool__detail">{detail}</span>}
+        </div>
+      </div>
+    );
+  }
+
+  // A user's own message is shown exactly as typed. Rendering it as markdown
+  // would silently reformat what they wrote.
+  const plain = streaming || block.kind === "user";
+
   return (
     <div className="row" style={{ top }} ref={node}>
-      <div className={`bubble bubble--${block.kind}`}>
+      <div
+        className={`bubble bubble--${block.kind}`}
+        onClick={plain ? undefined : openLinksExternally}
+      >
         {block.kind === "reasoning" && <div className="bubble__label">thinking</div>}
-        {/* `pre-wrap` is not a style choice. The whole point of the delta
-            handling underneath is that whitespace is content, and collapsing
-            it here would throw that away at the last step. */}
-        <div className="bubble__text">{block.text}</div>
+        {plain ? (
+          // `pre-wrap` is not a style choice. The whole point of the delta
+          // handling underneath is that whitespace is content, and collapsing
+          // it here would throw that away at the last step.
+          <div className="bubble__text">{block.text}</div>
+        ) : (
+          <Markdown text={block.text} />
+        )}
       </div>
     </div>
   );
 });
+
+function statusMark(status: ToolStatus): string {
+  switch (status) {
+    case "running":
+      return "·";
+    case "ok":
+      return "✓";
+    case "failed":
+      return "✕";
+    case "denied":
+      return "–";
+    default:
+      return "·";
+  }
+}

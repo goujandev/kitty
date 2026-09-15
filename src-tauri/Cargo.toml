@@ -22,6 +22,7 @@ kitty-engine = { workspace = true }
 kitty-probe = { workspace = true }
 kitty-store = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"

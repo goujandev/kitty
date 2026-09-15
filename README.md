@@ -10,14 +10,17 @@ Windows only. See [ADR-0001](docs/adr/0001-stack-and-process-model.md).
 
 ## Status
 
-Slices 1 and 2 of the first prototype are done.
+Slices 1 to 3 of the first prototype are done.
 
 kitty finds Claude Code and Codex, reports whether each is signed in, and tells
 you the exact command to fix anything that is not ready. You can open a folder,
 start a session on either agent, and watch a reply stream in. Close the window
 and reopen it and the conversation is still there, on the same vendor session.
 
-Next: tools and approvals, then model pickers, then the project selector proper.
+The agent can also use tools. When it wants to write a file or run a command,
+kitty asks you first and shows what it did.
+
+Next: model pickers, then the project selector proper.
 See [PROTOTYPE-1.md](docs/PROTOTYPE-1.md).
 
 ## Running it

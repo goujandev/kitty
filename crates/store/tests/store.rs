@@ -311,3 +311,83 @@ fn a_missing_session_is_an_error_not_a_panic() {
     let store = store();
     assert!(store.session("nope").is_err());
 }
+
+#[test]
+fn an_unused_session_is_pruned_and_a_used_one_is_not() {
+    // Picking an agent and changing your mind should leave nothing behind.
+    let store = store();
+    let project = store
+        .open_project(std::path::Path::new(r"C:\work\kitty"))
+        .expect("project");
+
+    let used = store
+        .create_session(&project.id, "claude", None)
+        .expect("used");
+    let abandoned = store
+        .create_session(&project.id, "codex", None)
+        .expect("abandoned");
+    store
+        .append_block(&used.id, BlockKind::User, "hello")
+        .expect("block");
+
+    assert_eq!(store.prune_empty_sessions(&project.id).expect("prune"), 1);
+
+    let left = store.list_sessions(&project.id).expect("list");
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].id, used.id);
+    assert!(store.session(&abandoned.id).is_err());
+}
+
+#[test]
+fn deleting_a_session_removes_it_from_search() {
+    let (store, session) = seeded();
+    store
+        .append_block(&session, BlockKind::Assistant, "mentions parsnips")
+        .expect("block");
+    assert_eq!(store.search("parsnips", 10).expect("search").len(), 1);
+
+    store.delete_session(&session).expect("delete");
+
+    assert!(
+        store.search("parsnips", 10).expect("search").is_empty(),
+        "search still returns a conversation that no longer exists"
+    );
+    assert!(store.blocks(&session).expect("blocks").is_empty());
+}
+
+#[test]
+fn a_migration_added_after_release_applies_to_an_existing_database() {
+    // Migration 2 added `blocks.meta`. A database created before it must gain
+    // the column on open, which is the whole point of forward-only migrations.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("kitty.db");
+
+    let session_id = {
+        let store = Store::open(&path).expect("open");
+        let project = store.open_project(dir.path()).expect("project");
+        let session = store
+            .create_session(&project.id, "claude", None)
+            .expect("session");
+        let seq = store
+            .append_block(&session.id, BlockKind::Tool, "Write src/main.rs")
+            .expect("tool block");
+        store
+            .set_block_meta(&session.id, seq, r#"{"status":"ok"}"#)
+            .expect("meta");
+        session.id
+    };
+
+    let reopened = Store::open(&path).expect("reopen");
+    let blocks = reopened.blocks(&session_id).expect("blocks");
+    assert_eq!(blocks[0].kind, BlockKind::Tool);
+    assert_eq!(blocks[0].meta.as_deref(), Some(r#"{"status":"ok"}"#));
+}
+
+#[test]
+fn a_block_without_meta_reads_back_as_none() {
+    let (store, session) = seeded();
+    store
+        .append_block(&session, BlockKind::Assistant, "plain")
+        .expect("append");
+    assert_eq!(store.blocks(&session).expect("blocks")[0].meta, None);
+}

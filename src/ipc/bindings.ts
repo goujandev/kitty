@@ -68,13 +68,50 @@ export interface Scan {
 
 // ------------------------------------------------------------- transcripts
 
-export type BlockKind = "user" | "assistant" | "reasoning";
+export type BlockKind = "user" | "assistant" | "reasoning" | "tool";
 
 export interface Block {
   seq: number;
   kind: BlockKind;
   text: string;
+  /** JSON detail for rows that need more than a line, i.e. tool activity. */
+  meta: string | null;
   createdAt: number;
+}
+
+/** How a tool call ended. */
+export type ToolStatus = "running" | "ok" | "failed" | "denied";
+
+/** What an agent is asking permission to do. */
+export type ApprovalKind = "edit" | "command" | "network" | "other";
+
+/**
+ * How a permission request was settled.
+ *
+ * `cancelled` means resolved without us: the harness decided, or the turn
+ * ended first. A real third case, not a synonym for denied.
+ */
+export type ApprovalOutcome = "allowed" | "denied" | "cancelled";
+
+/** Parsed `Block.meta` for a tool row. */
+export interface ToolMeta {
+  status: ToolStatus;
+  detail: string | null;
+}
+
+export function toolMeta(block: Block): ToolMeta {
+  if (!block.meta) return { status: "running", detail: null };
+  try {
+    const parsed = JSON.parse(block.meta) as Partial<ToolMeta>;
+    return {
+      status: parsed.status ?? "running",
+      detail: parsed.detail ?? null,
+    };
+  } catch {
+    // A row we cannot read is still a row; showing it as running is better
+    // than dropping it.
+    return { status: "running", detail: null };
+  }
 }
 
 export interface Usage {
@@ -121,6 +158,20 @@ export type TranscriptEvent =
   | { kind: "blockAppended"; seq: number; blockKind: BlockKind; text: string }
   | { kind: "blockDelta"; seq: number; text: string }
   | { kind: "blockFinal"; seq: number; text: string }
+  | {
+      kind: "toolStatusChanged";
+      seq: number;
+      status: ToolStatus;
+      detail: string | null;
+    }
+  | {
+      kind: "approvalRequested";
+      id: string;
+      approvalKind: ApprovalKind;
+      title: string;
+      detail: string | null;
+    }
+  | { kind: "approvalResolved"; id: string; outcome: ApprovalOutcome }
   | { kind: "turnEnded"; stop: StopReason }
   | { kind: "usage"; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number }
   | { kind: "context"; used: number | null; window: number | null }

@@ -57,6 +57,9 @@ walk(contract.scan);
 // Harness ids are a bare string union rather than tagged objects.
 for (const id of contract.harnessIds ?? []) tags.add(id);
 for (const kind of contract.blockKinds ?? []) tags.add(kind);
+for (const group of ["toolStatuses", "approvalKinds", "approvalOutcomes"]) {
+  for (const value of contract[group] ?? []) tags.add(value);
+}
 
 const problems = [];
 

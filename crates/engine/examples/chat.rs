@@ -64,11 +64,12 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::FAILURE;
     }
 
-    stream_turn(&events, started)
+    stream_turn(&session, &events, started)
 }
 
 /// Prints one turn as it arrives. Returns non-zero if anything went wrong.
 fn stream_turn(
+    session: &Session,
     events: &std::sync::mpsc::Receiver<SessionEvent>,
     started: Instant,
 ) -> std::process::ExitCode {
@@ -117,34 +118,22 @@ fn stream_turn(
             }
 
             SessionEvent::MessageDone { text } => {
-                if text != streamed {
+                // A turn can contain several messages, so the comparison is
+                // per message and the buffer resets after each one.
+                let spoken = std::mem::take(&mut streamed);
+                if text != spoken {
                     // The snapshot is authoritative. Any disagreement is a
                     // codec bug and should be loud, not silently corrected.
                     eprintln!("\n\n!! stream and final snapshot disagree");
-                    eprintln!("   streamed: {streamed:?}");
+                    eprintln!("   streamed: {spoken:?}");
                     eprintln!("   snapshot: {text:?}");
                     exit = std::process::ExitCode::FAILURE;
                 }
             }
 
-            SessionEvent::Usage(usage) => {
-                eprintln!(
-                    "\n\ntokens  in {} out {} cache-read {}",
-                    usage.input_tokens, usage.output_tokens, usage.cache_read_tokens
-                );
-            }
-
-            SessionEvent::Context { used, window } => {
-                if let (Some(used), Some(window)) = (used, window) {
-                    eprintln!("context {used} / {window}");
-                }
-            }
-
-            SessionEvent::RateLimits { windows } => {
-                for w in windows {
-                    eprintln!("limit   {} at {:.0}%", w.label, w.utilization * 100.0);
-                }
-            }
+            SessionEvent::Usage(usage) => print_usage(&usage),
+            SessionEvent::Context { used, window } => print_context(used, window),
+            SessionEvent::RateLimits { windows } => print_limits(&windows),
 
             SessionEvent::Error {
                 error_kind,
@@ -163,7 +152,32 @@ fn stream_turn(
                 return exit;
             }
 
-            SessionEvent::TurnStarted
+            SessionEvent::ToolStarted { title, .. } => {
+                eprintln!("\n  ▸ {title}");
+            }
+
+            SessionEvent::ToolEnded { status, detail, .. } => {
+                let mark = match status {
+                    kitty_core::ToolStatus::Ok => "done",
+                    kitty_core::ToolStatus::Failed => "failed",
+                    kitty_core::ToolStatus::Denied => "denied",
+                    kitty_core::ToolStatus::Running => "running",
+                };
+                eprintln!(
+                    "    {mark}{}",
+                    detail.map_or(String::new(), |d| format!(": {d}"))
+                );
+            }
+
+            SessionEvent::ApprovalRequested { id, title, .. } => {
+                // A headless run has nobody to ask, so it approves and says so
+                // rather than hanging on a prompt with no screen.
+                eprintln!("\n  ? {title}  (auto-approving)");
+                let _ = session.respond(id, true);
+            }
+
+            SessionEvent::ApprovalResolved { .. }
+            | SessionEvent::TurnStarted
             | SessionEvent::ReasoningDone
             | SessionEvent::Status { .. } => {}
         }
@@ -171,4 +185,23 @@ fn stream_turn(
 
     eprintln!("\ntimed out waiting for the turn to finish");
     std::process::ExitCode::FAILURE
+}
+
+fn print_usage(usage: &kitty_core::Usage) {
+    eprintln!(
+        "\n\ntokens  in {} out {} cache-read {}",
+        usage.input_tokens, usage.output_tokens, usage.cache_read_tokens
+    );
+}
+
+fn print_context(used: Option<u64>, window: Option<u64>) {
+    if let (Some(used), Some(window)) = (used, window) {
+        eprintln!("context {used} / {window}");
+    }
+}
+
+fn print_limits(windows: &[kitty_core::RateLimitWindow]) {
+    for w in windows {
+        eprintln!("limit   {} at {:.0}%", w.label, w.utilization * 100.0);
+    }
 }

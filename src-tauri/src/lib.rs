@@ -91,10 +91,27 @@ fn open_project(state: State<'_, AppState>, path: String) -> Result<Project, Str
     if !root.is_dir() {
         return Err(format!("{path} is not a folder"));
     }
-    state
+    let project = state
         .store
         .open_project(&root)
-        .map_err(|e| fail("could not open that project", e))
+        .map_err(|e| fail("could not open that project", e))?;
+
+    Ok(project)
+}
+
+/// Removes sessions in a project that were never used.
+///
+/// Called whenever a project is opened, including when one is restored at
+/// startup. Picking an agent no longer creates a session, but this clears out
+/// rows left by the previous behaviour, or by a crash between creating a
+/// session and sending the first message.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn prune_sessions(state: State<'_, AppState>, project_id: String) -> Result<usize, String> {
+    state
+        .store
+        .prune_empty_sessions(&project_id)
+        .map_err(|e| fail("could not tidy up old sessions", e))
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -241,6 +258,25 @@ fn send_turn(state: State<'_, AppState>, session_id: String, text: String) -> Re
     }
 }
 
+/// Answers a permission request the agent raised.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn respond_approval(
+    state: State<'_, AppState>,
+    session_id: String,
+    id: String,
+    allow: bool,
+) -> Result<(), String> {
+    let live = state
+        .live
+        .lock()
+        .map_err(|_| "the session registry was poisoned".to_owned())?;
+    if let Some(session) = live.get(&session_id) {
+        let _ = session.session.respond(id, allow);
+    }
+    Ok(())
+}
+
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 fn cancel_turn(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
@@ -320,11 +356,13 @@ pub fn run() {
             pick_folder,
             open_project,
             list_projects,
+            prune_sessions,
             list_sessions,
             create_session,
             session_blocks,
             start_session,
             send_turn,
+            respond_approval,
             cancel_turn,
             stop_session,
             search,

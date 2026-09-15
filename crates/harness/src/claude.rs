@@ -22,10 +22,15 @@
 //! Claude hands us `rate_limit_event` unprompted, which is why kitty never has
 //! to touch a credential file to show usage (ADR-0004).
 
-use kitty_core::{ErrorKind, RateLimitWindow, SessionEvent, StopReason, Usage};
+use std::collections::HashMap;
+
+use kitty_core::{
+    ApprovalKind, ApprovalOutcome, ErrorKind, RateLimitWindow, SessionEvent, StopReason,
+    ToolStatus, Usage,
+};
 use serde_json::{json, Value};
 
-use crate::{str_field, u64_field, Codec, StartContext, Step};
+use crate::{first_line, str_field, summarize, u64_field, Codec, StartContext, Step};
 
 /// Argv after the resolved binary.
 ///
@@ -42,16 +47,31 @@ pub fn launch_args() -> Vec<String> {
         "stream-json",
         "--verbose",
         "--include-partial-messages",
+        // Makes the CLI ask us before each tool call, over the same stream.
+        // Without it the CLI decides alone and there is nothing to show.
+        "--permission-prompt-tool",
+        "stdio",
     ]
     .into_iter()
     .map(str::to_owned)
     .collect()
 }
 
+/// A tool call whose arguments are still streaming.
+struct PendingTool {
+    id: String,
+    name: String,
+    /// `input_json_delta` fragments, concatenated. Only parseable once the
+    /// block stops, which is why the row is announced then.
+    partial: String,
+}
+
 #[derive(Default)]
 pub struct ClaudeCodec {
     /// Content-block indices currently carrying thinking rather than text.
     thinking_blocks: Vec<usize>,
+    /// Tool calls being assembled, by content-block index.
+    tools: HashMap<usize, PendingTool>,
     /// Incrementing id for control requests such as interrupt.
     next_control: u64,
     started: bool,
@@ -84,6 +104,26 @@ impl Codec for ClaudeCodec {
         )
     }
 
+    fn respond_approval(&mut self, id: &str, allow: bool) -> Step {
+        // The id is the CLI's own `request_id`, echoed straight back.
+        let response = if allow {
+            json!({ "behavior": "allow" })
+        } else {
+            json!({ "behavior": "deny", "message": "The user declined." })
+        };
+        Step::send(
+            json!({
+                "type": "control_response",
+                "response": {
+                    "subtype": "success",
+                    "request_id": id,
+                    "response": response,
+                },
+            })
+            .to_string(),
+        )
+    }
+
     fn cancel(&mut self) -> Step {
         self.next_control += 1;
         Step::send(
@@ -107,8 +147,11 @@ impl Codec for ClaudeCodec {
             Some("system") => self.on_system(&msg),
             Some("stream_event") => self.on_stream_event(&msg),
             Some("assistant") => on_assistant(&msg),
+            Some("user") => on_user(&msg),
             Some("result") => on_result(&msg),
             Some("rate_limit_event") => on_rate_limit(&msg),
+            Some("control_request" | "sdk_control_request") => on_control_request(&msg),
+            Some("control_cancel_request") => on_control_cancel(&msg),
             _ => Step::none(),
         }
     }
@@ -143,12 +186,29 @@ impl ClaudeCodec {
 
             Some("content_block_start") => {
                 let index = usize::try_from(u64_field(event, "index").unwrap_or(0)).unwrap_or(0);
-                let is_thinking = event
-                    .get("content_block")
-                    .and_then(|b| str_field(b, "type"))
-                    .is_some_and(|t| t == "thinking" || t == "redacted_thinking");
-                if is_thinking && !self.thinking_blocks.contains(&index) {
-                    self.thinking_blocks.push(index);
+                let block = event.get("content_block");
+                match block.and_then(|b| str_field(b, "type")) {
+                    Some("thinking" | "redacted_thinking") => {
+                        if !self.thinking_blocks.contains(&index) {
+                            self.thinking_blocks.push(index);
+                        }
+                    }
+                    Some("tool_use") => {
+                        // Arguments arrive as JSON fragments after this, so the
+                        // row is announced when the block stops and the input
+                        // can actually be read.
+                        if let Some(block) = block {
+                            self.tools.insert(
+                                index,
+                                PendingTool {
+                                    id: str_field(block, "id").unwrap_or_default().to_owned(),
+                                    name: str_field(block, "name").unwrap_or("tool").to_owned(),
+                                    partial: String::new(),
+                                },
+                            );
+                        }
+                    }
+                    _ => {}
                 }
                 Step::none()
             }
@@ -167,6 +227,16 @@ impl ClaudeCodec {
                         .map_or_else(Step::none, |t| {
                             Step::event(SessionEvent::ReasoningDelta { text: t.to_owned() })
                         }),
+                    Some("input_json_delta") => {
+                        let index =
+                            usize::try_from(u64_field(event, "index").unwrap_or(0)).unwrap_or(0);
+                        if let (Some(tool), Some(fragment)) =
+                            (self.tools.get_mut(&index), str_field(delta, "partial_json"))
+                        {
+                            tool.partial.push_str(fragment);
+                        }
+                        Step::none()
+                    }
                     _ => Step::none(),
                 }
             }
@@ -176,6 +246,16 @@ impl ClaudeCodec {
                 if let Some(at) = self.thinking_blocks.iter().position(|&i| i == index) {
                     self.thinking_blocks.swap_remove(at);
                     return Step::event(SessionEvent::ReasoningDone);
+                }
+                if let Some(tool) = self.tools.remove(&index) {
+                    // Arguments that never parsed still get a row. A tool call
+                    // with unreadable input is worth showing, not hiding.
+                    let input = serde_json::from_str(&tool.partial).unwrap_or(Value::Null);
+                    return Step::event(SessionEvent::ToolStarted {
+                        call_id: tool.id,
+                        title: summarize(&tool.name, &input),
+                        name: tool.name,
+                    });
                 }
                 Step::none()
             }
@@ -208,6 +288,99 @@ fn on_assistant(msg: &Value) -> Step {
         return Step::none();
     }
     Step::event(SessionEvent::MessageDone { text })
+}
+
+/// A `user` message carries tool results back from the CLI.
+fn on_user(msg: &Value) -> Step {
+    let Some(blocks) = msg
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(Value::as_array)
+    else {
+        return Step::none();
+    };
+
+    let mut step = Step::none();
+    for block in blocks {
+        if str_field(block, "type") != Some("tool_result") {
+            continue;
+        }
+        let Some(call_id) = str_field(block, "tool_use_id") else {
+            continue;
+        };
+        let failed = block.get("is_error").and_then(Value::as_bool) == Some(true);
+        step.events.push(SessionEvent::ToolEnded {
+            call_id: call_id.to_owned(),
+            status: if failed {
+                ToolStatus::Failed
+            } else {
+                ToolStatus::Ok
+            },
+            detail: tool_result_text(block).map(|t| first_line(&t, 160)),
+        });
+    }
+    step
+}
+
+/// A tool result is either a string or a list of content blocks.
+fn tool_result_text(block: &Value) -> Option<String> {
+    match block.get("content") {
+        Some(Value::String(text)) => Some(text.clone()),
+        Some(Value::Array(parts)) => {
+            let joined: String = parts
+                .iter()
+                .filter_map(|p| str_field(p, "text"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!joined.is_empty()).then_some(joined)
+        }
+        _ => None,
+    }
+}
+
+/// The CLI asking permission, which it does because of
+/// `--permission-prompt-tool stdio`.
+fn on_control_request(msg: &Value) -> Step {
+    let Some(request) = msg.get("request") else {
+        return Step::none();
+    };
+    if str_field(request, "subtype") != Some("can_use_tool") {
+        return Step::none();
+    }
+    let Some(id) = str_field(msg, "request_id") else {
+        return Step::none();
+    };
+
+    let name = str_field(request, "tool_name").unwrap_or("a tool");
+    let input = request.get("input").cloned().unwrap_or(Value::Null);
+
+    Step::event(SessionEvent::ApprovalRequested {
+        id: id.to_owned(),
+        approval_kind: approval_kind(name),
+        title: summarize(name, &input),
+        detail: str_field(request, "description").map(|d| first_line(d, 200)),
+    })
+}
+
+/// The CLI withdrawing a request, usually because a hook decided first.
+fn on_control_cancel(msg: &Value) -> Step {
+    str_field(msg, "request_id").map_or_else(Step::none, |id| {
+        Step::event(SessionEvent::ApprovalResolved {
+            id: id.to_owned(),
+            outcome: ApprovalOutcome::Cancelled,
+        })
+    })
+}
+
+/// Coarse category, from the tool's name. Picks a verb and an icon, nothing
+/// more, so an unknown tool falling into `Other` is harmless.
+fn approval_kind(name: &str) -> ApprovalKind {
+    match name {
+        "Write" | "Edit" | "NotebookEdit" | "MultiEdit" => ApprovalKind::Edit,
+        "Bash" | "BashOutput" | "KillShell" | "PowerShell" => ApprovalKind::Command,
+        "WebFetch" | "WebSearch" => ApprovalKind::Network,
+        _ => ApprovalKind::Other,
+    }
 }
 
 fn on_result(msg: &Value) -> Step {
@@ -275,7 +448,7 @@ fn on_rate_limit(msg: &Value) -> Step {
         .iter()
         .filter_map(|(label, body)| {
             Some(RateLimitWindow {
-                label: label.clone(),
+                label: window_label(label),
                 utilization: body.get("utilization").and_then(Value::as_f64)?,
                 resets_at_ms: body
                     .get("resetsAt")
@@ -291,6 +464,16 @@ fn on_rate_limit(msg: &Value) -> Step {
     // Stable order so the footer does not reshuffle between turns.
     parsed.sort_by(|a, b| a.label.cmp(&b.label));
     Step::event(SessionEvent::RateLimits { windows: parsed })
+}
+
+/// Claude names its windows; Codex describes them by duration. Both end up as
+/// the same short label so the status line reads consistently.
+fn window_label(vendor: &str) -> String {
+    match vendor {
+        "five_hour" => "5h".to_owned(),
+        "seven_day" => "7d".to_owned(),
+        other => other.replace('_', " "),
+    }
 }
 
 /// Classifies an error the CLI reported. Used by the engine, not by decoding.
@@ -522,8 +705,8 @@ mod tests {
         );
         match step.events.as_slice() {
             [SessionEvent::RateLimits { windows }] => {
-                assert_eq!(windows[0].label, "five_hour");
-                assert_eq!(windows[1].label, "seven_day");
+                assert_eq!(windows[0].label, "5h");
+                assert_eq!(windows[1].label, "7d");
                 assert_eq!(windows[0].resets_at_ms, Some(1_789_462_200_000));
             }
             other => panic!("unexpected events: {other:?}"),
