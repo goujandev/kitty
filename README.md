@@ -10,7 +10,7 @@ Windows only. See [ADR-0001](docs/adr/0001-stack-and-process-model.md).
 
 ## Status
 
-Slices 1 to 3 of the first prototype are done.
+The first prototype is complete. All five slices are done.
 
 kitty finds Claude Code and Codex, reports whether each is signed in, and tells
 you the exact command to fix anything that is not ready. You can open a folder,
@@ -20,8 +20,11 @@ and reopen it and the conversation is still there, on the same vendor session.
 The agent can also use tools. When it wants to write a file or run a command,
 kitty asks you first and shows what it did.
 
-Next: model pickers, then the project selector proper.
-See [PROTOTYPE-1.md](docs/PROTOTYPE-1.md).
+Models come from the CLIs themselves, so every model your subscription allows
+is in the picker, with its reasoning effort levels. A projects screen lists
+every folder you have worked in, and search runs across every conversation.
+
+See [PROTOTYPE-1.md](docs/PROTOTYPE-1.md) for what each slice covered.
 
 ## Running it
 
@@ -76,6 +79,7 @@ enforced by a test, not just by intent. See
 | | |
 |---|---|
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design |
+| [DESIGN-PHILOSOPHY.md](docs/DESIGN-PHILOSOPHY.md) | How it should feel, and the bar we hold it to |
 | [PROTOTYPE-1.md](docs/PROTOTYPE-1.md) | First prototype: scope, slices, acceptance |
 | [MODEL-CATALOG.md](docs/MODEL-CATALOG.md) | How models are discovered |
 | [LESSONS-FROM-MONOCODE.md](docs/LESSONS-FROM-MONOCODE.md) | What a close read of the closest existing product established |

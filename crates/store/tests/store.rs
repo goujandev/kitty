@@ -101,29 +101,27 @@ fn whitespace_in_a_block_survives_a_round_trip() {
 }
 
 #[test]
-fn an_empty_block_can_be_discarded() {
+fn a_sequence_number_is_never_handed_out_twice() {
+    // The frontend keys its transcript, its row heights and its search hits on
+    // this number, and is never told a sequence changed meaning. Reusing one
+    // put an answer inside a thinking bubble.
     let (store, session) = seeded();
-    let seq = store
-        .append_block(&session, BlockKind::Assistant, "")
-        .expect("append");
 
-    assert!(store
-        .discard_block_if_empty(&session, seq)
-        .expect("discard"));
-    assert!(store.blocks(&session).expect("blocks").is_empty());
-}
+    let mut seen = Vec::new();
+    for kind in [
+        BlockKind::User,
+        BlockKind::Reasoning,
+        BlockKind::Assistant,
+        BlockKind::Tool,
+    ] {
+        seen.push(store.append_block(&session, kind, "text").expect("append"));
+    }
 
-#[test]
-fn a_block_with_text_is_never_discarded() {
-    let (store, session) = seeded();
-    let seq = store
-        .append_block(&session, BlockKind::Assistant, "partial answer")
-        .expect("append");
-
-    assert!(!store
-        .discard_block_if_empty(&session, seq)
-        .expect("discard"));
-    assert_eq!(store.blocks(&session).expect("blocks").len(), 1);
+    let mut unique = seen.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(unique.len(), seen.len(), "sequences repeated: {seen:?}");
+    assert_eq!(seen, vec![0, 1, 2, 3]);
 }
 
 #[test]
@@ -390,4 +388,61 @@ fn a_block_without_meta_reads_back_as_none() {
         .append_block(&session, BlockKind::Assistant, "plain")
         .expect("append");
     assert_eq!(store.blocks(&session).expect("blocks")[0].meta, None);
+}
+
+#[test]
+fn deleting_a_project_removes_its_sessions_and_their_search_entries() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = Store::open(dir.path().join("kitty.db")).expect("open");
+
+    let kept = store
+        .open_project(&dir.path().join("kept"))
+        .expect("kept project");
+    let doomed = store
+        .open_project(&dir.path().join("doomed"))
+        .expect("doomed project");
+
+    let keep = store
+        .create_session(&kept.id, "claude", None)
+        .expect("session");
+    let drop = store
+        .create_session(&doomed.id, "codex", None)
+        .expect("session");
+    store
+        .append_block(&keep.id, BlockKind::Assistant, "keep parsnips")
+        .expect("block");
+    store
+        .append_block(&drop.id, BlockKind::Assistant, "drop parsnips")
+        .expect("block");
+
+    assert_eq!(store.search("parsnips", 10).expect("search").len(), 2);
+
+    store.delete_project(&doomed.id).expect("delete");
+
+    let hits = store.search("parsnips", 10).expect("search");
+    assert_eq!(hits.len(), 1, "search still returns a deleted project");
+    assert_eq!(hits[0].session_id, keep.id);
+    assert!(store.session(&drop.id).is_err());
+    assert!(store.session(&keep.id).is_ok());
+    assert_eq!(store.list_projects().expect("list").len(), 1);
+}
+
+#[test]
+fn session_counts_are_reported_per_project() {
+    let store = store();
+    let a = store
+        .open_project(std::path::Path::new(r"C:\a"))
+        .expect("a");
+    let b = store
+        .open_project(std::path::Path::new(r"C:\b"))
+        .expect("b");
+
+    store.create_session(&a.id, "claude", None).expect("s1");
+    store.create_session(&a.id, "codex", None).expect("s2");
+    store.create_session(&b.id, "claude", None).expect("s3");
+
+    let counts = store.session_counts().expect("counts");
+    let find = |id: &str| counts.iter().find(|(p, _)| p == id).map(|(_, n)| *n);
+    assert_eq!(find(&a.id), Some(2));
+    assert_eq!(find(&b.id), Some(1));
 }

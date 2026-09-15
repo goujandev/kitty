@@ -32,6 +32,8 @@ pub struct SessionSpec {
     /// Vendor session or thread id to continue, when we have one.
     pub resume: Option<String>,
     pub model: Option<String>,
+    /// Reasoning effort, when the chosen model accepts one.
+    pub effort: Option<String>,
 }
 
 impl SessionSpec {
@@ -42,6 +44,7 @@ impl SessionSpec {
             cwd: cwd.into(),
             resume: None,
             model: None,
+            effort: None,
         }
     }
 }
@@ -86,6 +89,11 @@ impl Session {
                 args.push("--model".to_owned());
                 args.push(model.clone());
             }
+            // Claude takes effort as a launch flag; Codex takes it per turn.
+            if let Some(effort) = &spec.effort {
+                args.push("--effort".to_owned());
+                args.push(effort.clone());
+            }
         }
 
         let mut child =
@@ -124,6 +132,7 @@ impl Session {
             cwd: spec.cwd.to_string_lossy().into_owned(),
             resume: spec.resume.clone(),
             model: spec.model.clone(),
+            effort: spec.effort.clone(),
         };
 
         thread::spawn(move || {

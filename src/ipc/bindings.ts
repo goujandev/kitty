@@ -200,10 +200,39 @@ export interface SessionRow {
   projectId: string;
   harness: HarnessId;
   model: string | null;
+  /** Reasoning effort, when the chosen model accepts one. */
+  effort: string | null;
   providerSession: string | null;
   title: string | null;
   createdAt: number;
   updatedAt: number;
+}
+
+/** One model, as its CLI describes it. */
+export interface ModelInfo {
+  /** What kitty passes back to the CLI to select this model. */
+  id: string;
+  displayName: string;
+  description: string | null;
+  /** Effort levels this model accepts. Empty is a real answer, not a gap. */
+  efforts: string[];
+  defaultEffort: string | null;
+  /** The CLI's own default. */
+  isDefault: boolean;
+}
+
+export interface ModelCatalog {
+  harness: HarnessId;
+  models: ModelInfo[];
+  cliVersion: string;
+  fetchedAtMs: number;
+}
+
+/** A project with enough context to decide whether to keep it. */
+export interface ProjectSummary extends Project {
+  sessionCount: number;
+  /** False when the folder has been moved or deleted since it was opened. */
+  exists: boolean;
 }
 
 export interface Hit {

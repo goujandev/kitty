@@ -17,6 +17,7 @@ workspace = true
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+kitty-catalog = { workspace = true }
 kitty-core = { workspace = true }
 kitty-engine = { workspace = true }
 kitty-probe = { workspace = true }

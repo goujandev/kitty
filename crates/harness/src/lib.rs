@@ -76,6 +76,8 @@ pub struct StartContext {
     /// Resume an existing vendor session or thread, when we have one.
     pub resume: Option<String>,
     pub model: Option<String>,
+    /// Reasoning effort, when the chosen model accepts one.
+    pub effort: Option<String>,
 }
 
 pub trait Codec: Send {

@@ -67,6 +67,8 @@ pub struct SessionRow {
     pub project_id: String,
     pub harness: String,
     pub model: Option<String>,
+    /// Reasoning effort, when the chosen model accepts one.
+    pub effort: Option<String>,
     pub provider_session: Option<String>,
     pub title: Option<String>,
     pub created_at: i64,
@@ -216,6 +218,35 @@ impl Store {
         })
     }
 
+    /// Counts the sessions in each project, for the projects list.
+    pub fn session_counts(&self) -> Result<Vec<(String, i64)>> {
+        self.read(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT project_id, COUNT(*) FROM sessions GROUP BY project_id")?;
+            let rows = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+    }
+
+    /// Forgets a project and everything under it.
+    ///
+    /// Sessions and blocks cascade, but `blocks_fts` is a virtual table with
+    /// no foreign key, so its rows go first and explicitly. Otherwise search
+    /// would keep returning hits for conversations that no longer exist.
+    pub fn delete_project(&self, project_id: &str) -> Result<()> {
+        self.write(|conn| {
+            conn.execute(
+                "DELETE FROM blocks_fts WHERE session_id IN
+                     (SELECT id FROM sessions WHERE project_id = ?1)",
+                params![project_id],
+            )?;
+            conn.execute("DELETE FROM projects WHERE id = ?1", params![project_id])?;
+            Ok(())
+        })
+    }
+
     pub fn create_session(
         &self,
         project_id: &str,
@@ -238,7 +269,8 @@ impl Store {
     pub fn session(&self, id: &str) -> Result<SessionRow> {
         self.read(|conn| {
             conn.query_row(
-                "SELECT id, project_id, harness, model, provider_session, title, created_at, updated_at
+                "SELECT id, project_id, harness, model, effort, provider_session, title,
+                        created_at, updated_at
                  FROM sessions WHERE id = ?1",
                 params![id],
                 session_from_row,
@@ -253,7 +285,8 @@ impl Store {
     pub fn list_sessions(&self, project_id: &str) -> Result<Vec<SessionRow>> {
         self.read(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, project_id, harness, model, provider_session, title, created_at, updated_at
+                "SELECT id, project_id, harness, model, effort, provider_session, title,
+                        created_at, updated_at
                  FROM sessions WHERE project_id = ?1 ORDER BY updated_at DESC",
             )?;
             let rows = stmt
@@ -274,11 +307,34 @@ impl Store {
         })
     }
 
+    /// Records the model a session is using.
+    ///
+    /// Called both when the user picks one and when the CLI reports what it
+    /// actually chose, which may differ from what was asked for.
     pub fn set_model(&self, session_id: &str, model: &str) -> Result<()> {
         self.write(|conn| {
             conn.execute(
                 "UPDATE sessions SET model = ?2, updated_at = ?3 WHERE id = ?1",
                 params![session_id, model, now_ms()],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Sets the model and effort a session should use from now on.
+    ///
+    /// Effort is cleared when the chosen model has no levels, rather than
+    /// carried over from a model that did.
+    pub fn set_model_choice(
+        &self,
+        session_id: &str,
+        model: &str,
+        effort: Option<&str>,
+    ) -> Result<()> {
+        self.write(|conn| {
+            conn.execute(
+                "UPDATE sessions SET model = ?2, effort = ?3, updated_at = ?4 WHERE id = ?1",
+                params![session_id, model, effort, now_ms()],
             )?;
             Ok(())
         })
@@ -357,23 +413,17 @@ impl Store {
         })
     }
 
-    /// Drops a block that never received any text, so an interrupted turn
-    /// does not leave an empty bubble in the transcript.
-    pub fn discard_block_if_empty(&self, session_id: &str, seq: i64) -> Result<bool> {
-        self.write(|conn| {
-            let removed = conn.execute(
-                "DELETE FROM blocks WHERE session_id = ?1 AND seq = ?2 AND text = ''",
-                params![session_id, seq],
-            )?;
-            if removed > 0 {
-                conn.execute(
-                    "DELETE FROM blocks_fts WHERE session_id = ?1 AND seq = ?2",
-                    params![session_id, seq],
-                )?;
-            }
-            Ok(removed > 0)
-        })
-    }
+    // There is deliberately no way to delete a single block.
+    //
+    // A sequence is `MAX(seq) + 1`, so removing the newest block hands its
+    // number to the next one. Everything downstream keys off that number --
+    // the frontend's transcript, its row heights, search hits -- and none of
+    // it is told the meaning changed. The symptom was an answer rendered
+    // inside a thinking bubble, because the emptied reasoning row it collided
+    // with had already been sent to the window.
+    //
+    // A block is created only once it has text (`sessions.rs`), so there is
+    // nothing empty left to clean up.
 
     /// Deletes a session and everything under it.
     ///
@@ -553,9 +603,10 @@ fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         project_id: row.get(1)?,
         harness: row.get(2)?,
         model: row.get(3)?,
-        provider_session: row.get(4)?,
-        title: row.get(5)?,
-        created_at: row.get(6)?,
-        updated_at: row.get(7)?,
+        effort: row.get(4)?,
+        provider_session: row.get(5)?,
+        title: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
     })
 }

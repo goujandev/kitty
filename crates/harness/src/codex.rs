@@ -65,6 +65,7 @@ pub struct CodexCodec {
     cwd: String,
     resume: Option<String>,
     model: Option<String>,
+    effort: Option<String>,
 }
 
 impl CodexCodec {
@@ -87,6 +88,11 @@ impl CodexCodec {
         });
         if let Some(model) = &self.model {
             params["model"] = json!(model);
+        }
+        // Effort belongs to the turn, not the thread, so changing it mid
+        // conversation needs no new thread.
+        if let Some(effort) = &self.effort {
+            params["effort"] = json!(effort);
         }
         Some(self.request("turn/start", &params, Pending::TurnStart))
     }
@@ -120,6 +126,7 @@ impl Codec for CodexCodec {
         self.cwd.clone_from(&ctx.cwd);
         self.resume.clone_from(&ctx.resume);
         self.model.clone_from(&ctx.model);
+        self.effort.clone_from(&ctx.effort);
 
         let line = self.request(
             "initialize",
@@ -624,6 +631,7 @@ mod tests {
             cwd: r"C:\work".into(),
             resume: None,
             model: None,
+            effort: None,
         }
     }
 
@@ -713,6 +721,7 @@ mod tests {
             cwd: r"C:\work".into(),
             resume: Some("thread-7".into()),
             model: None,
+            effort: None,
         });
         let init = parse(&start.send[0]);
         let after = feed(&mut codec, json!({"id": init["id"], "result": {}}));

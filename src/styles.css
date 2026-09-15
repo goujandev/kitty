@@ -1,15 +1,23 @@
 :root {
-  --bg: #0e0f12;
-  --panel: #16181d;
-  --panel-2: #1b1e24;
-  --panel-edge: #23262e;
-  --text: #e7e9ee;
-  --muted: #8c94a4;
-  --accent: #7aa2f7;
-  --ready: #7ee0a8;
-  --blocked: #f0b37e;
-  --danger: #f2777a;
+  /* Neutral dark. No blue in the greys: a tint that reads as "cool" at one
+     step becomes a colour cast across a whole window of panels. */
+  --bg: #131313;
+  /* The strip along the top, a shade off the canvas rather than a step. */
+  --bar: #181818;
+  --panel: #1e1e1e;
+  --panel-2: #232323;
+  --panel-edge: #292929;
+  --text: #ededed;
+  --muted: #8a8a8a;
+  --accent: #2dd4bf;
+  --ready: #4ade80;
+  --blocked: #e3b341;
+  --danger: #f87171;
   --radius: 10px;
+  /* Reading width of the conversation. The transcript, the picker row and the
+     composer all share it, so the whole chat reads as one centred column
+     rather than text stretched across a wide window. */
+  --column: 760px;
 
   color-scheme: dark;
   font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
@@ -35,172 +43,75 @@ body {
   overflow: hidden;
 }
 
+/* Three panes: the folders you work in, the conversations in the chosen
+   folder, and the conversation itself. Nothing is hidden behind a tab, so
+   picking a project and picking a chat are one gesture each. */
 .app {
   display: flex;
-  flex-direction: column;
   height: 100%;
 }
 
-/* ----------------------------------------------------------------- tabs */
+/* ----------------------------------------------------------------- rails */
 
-.tabs {
+.rail {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  width: 212px;
+  border-right: 1px solid var(--panel-edge);
+  overflow: hidden;
+}
+
+.rail__head {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--panel-edge);
-  flex: none;
-}
-
-.tab {
-  padding: 5px 12px;
-  border: 0;
-  border-radius: 7px;
-  background: none;
-  color: var(--muted);
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-}
-
-.tab:hover {
-  color: var(--text);
-}
-
-.tab--active {
-  background: var(--panel);
-  color: var(--text);
-}
-
-.tabs__note {
-  margin-left: auto;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-/* -------------------------------------------------------------- chat shell */
-
-.chat {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.chat__main {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-}
-
-/* ---------------------------------------------------------------- sidebar */
-
-.sidebar {
-  display: flex;
-  flex-direction: column;
-  flex: none;
-  width: 236px;
-  border-right: 1px solid var(--panel-edge);
-  padding: 12px;
-  gap: 18px;
-  overflow: hidden;
-}
-
-.project {
-  display: flex;
-  align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 8px;
-  background: var(--panel);
-  color: var(--text);
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-
-.project:hover {
-  border-color: var(--accent);
-}
-
-.project__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 600;
-}
-
-.project__action {
   flex: none;
-  color: var(--muted);
-  font-size: 11px;
+  height: 38px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--panel-edge);
+  background: var(--bar);
 }
 
-.sidebar__section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-height: 0;
-}
-
-.sidebar__section--grow {
-  flex: 1;
-  min-height: 0;
-}
-
-.sidebar__heading {
+.rail__title {
   margin: 0;
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
-.sidebar__note {
-  margin: 0;
-  font-size: 12px;
-}
-
-.starters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.starter {
-  padding: 5px 10px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 7px;
-  background: var(--panel);
-  color: var(--text);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-}
-
-.starter:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-.starter:disabled {
-  color: var(--muted);
-  cursor: not-allowed;
-}
-
-.sessions {
-  margin: 0;
-  padding: 0;
+.rail__list {
   list-style: none;
-  overflow-y: auto;
+  flex: 1;
   min-height: 0;
+  overflow-y: auto;
+  margin: 0;
+  padding: 8px;
 }
 
-.session {
+.rail__foot {
+  flex: none;
+  border-top: 1px solid var(--panel-edge);
+  padding: 8px;
+}
+
+.rail__promise {
+  margin: 0 0 6px;
+  padding: 0 9px;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.rail__empty {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+/* One row in either rail: a project, or a conversation. */
+.entry {
   display: block;
   width: 100%;
   padding: 7px 9px;
@@ -213,15 +124,20 @@ body {
   text-align: left;
 }
 
-.session:hover {
+.entry:hover {
   background: var(--panel);
 }
 
-.session--active {
+.entry--active {
   background: var(--panel-2);
 }
 
-.session__title {
+.entry--missing .entry__name {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.entry__name {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -229,10 +145,167 @@ body {
   font-size: 13px;
 }
 
-.session__meta {
-  display: block;
+.entry__meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   color: var(--muted);
   font-size: 11px;
+}
+
+.entry__remove {
+  /* Taken out of flow: hidden until hover, and `visibility` alone would still
+     reserve a line under every project. */
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  visibility: hidden;
+}
+
+.entry:hover .entry__remove,
+.entry__remove:focus-visible {
+  visibility: visible;
+}
+
+.entry__remove:hover {
+  color: var(--danger);
+}
+
+.search {
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 6px 9px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.search:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.rail--chats {
+  width: 248px;
+}
+
+.rail__tools {
+  flex: none;
+  padding: 8px 8px 0;
+}
+
+.rail__list li {
+  position: relative;
+}
+
+.rail__confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 9px 6px;
+  font-size: 11px;
+}
+
+.linkish--danger {
+  color: var(--danger);
+}
+
+/* The agents screen sits in the third pane rather than on its own. */
+.page {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+/* -------------------------------------------------------------- chat shell */
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  height: 38px;
+  padding: 0 0 0 16px;
+  border-bottom: 1px solid var(--panel-edge);
+  background: var(--bar);
+}
+
+/* Whether the agent is working, in the one place always on screen. */
+.chat__dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--panel-edge);
+}
+
+.chat__dot--busy {
+  background: var(--blocked);
+}
+
+.chat__title {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------- window controls */
+
+.wincontrols {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  /* Reaches the corner, which is where a hand goes looking for close. */
+  margin-left: auto;
+}
+
+.wincontrol {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 38px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.wincontrol svg {
+  stroke: currentColor;
+  stroke-width: 1.1;
+}
+
+.wincontrol:hover {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.wincontrol--close:hover {
+  background: #c42b1c;
+  color: #fff;
 }
 
 /* ------------------------------------------------------------- transcript */
@@ -253,52 +326,98 @@ body {
 .transcript__spacer {
   position: relative;
   width: 100%;
+  max-width: var(--column);
+  /* Centred, while the scroller stays full width so the scrollbar sits at the
+     edge of the window rather than beside the text. */
+  margin: 0 auto;
 }
 
 .row {
   position: absolute;
   left: 0;
   right: 0;
-  padding-bottom: 12px;
+  padding-bottom: 2px;
 }
 
-.bubble {
-  max-width: 760px;
-  padding: 10px 13px;
-  border-radius: 10px;
-  border: 1px solid var(--panel-edge);
-  background: var(--panel);
+/* The agent's words are the page; yours are a bubble pushed to the right.
+   Nothing is announced above a message -- who said it goes underneath, quietly,
+   because the answer is what you are reading and the model that produced it is
+   a footnote you look for only when you want it. */
+.msg {
+  padding-bottom: 14px;
 }
 
-.bubble--user {
-  /* Narrower and right-aligned, so who said what is readable at a glance
-     rather than something you work out from the wording. */
-  max-width: 68%;
-  margin-left: auto;
-  background: #202632;
-  border-color: #2f3646;
+.msg__text {
+  /* `pre-wrap` is not a style choice. The whole point of the delta handling
+     underneath is that whitespace is content, and collapsing it here would
+     throw that away at the last step. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-.bubble--reasoning {
-  background: transparent;
-  border-style: dashed;
-  color: var(--muted);
-}
-
-.bubble__label {
-  margin-bottom: 4px;
+.msg__label {
+  margin-bottom: 2px;
   color: var(--muted);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.bubble__text {
-  /* Whitespace is content. Collapsing it here would undo the delta handling
-     underneath, which exists precisely to preserve it. */
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  user-select: text;
+.msg--reasoning .msg__text {
+  padding-left: 10px;
+  border-left: 2px solid var(--panel-edge);
+  color: var(--muted);
+}
+
+.msg--user {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.msg--user .msg__text {
+  max-width: 78%;
+  padding: 6px 12px;
+  border-radius: 9px;
+  background: var(--panel-2);
+}
+
+/* Who said it, after the fact. */
+.msg__sign {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.msg__signname {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg__copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: 3px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.msg__copy:hover {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.mark {
+  flex: none;
+  border-radius: 6px;
 }
 
 /* ------------------------------------------------------------- status line */
@@ -307,11 +426,10 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: none;
-  padding: 6px 22px;
-  border-top: 1px solid var(--panel-edge);
+  flex: 1;
+  min-width: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .statusline__state {
@@ -323,6 +441,67 @@ body {
 .statusline__meta {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------- usage */
+
+.usage {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Puts the separator and the meter in one run so they cannot be split
+   across a wrap. */
+.usage__window {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.usage__sep {
+  color: var(--panel-edge);
+}
+
+.usage__meter {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: default;
+}
+
+.usage__bar {
+  display: block;
+  overflow: hidden;
+  width: 38px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--panel-2);
+}
+
+.usage__fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+/* Colour only once it is worth changing behaviour over. */
+.usage__fill--warm {
+  background: var(--blocked);
+}
+
+.usage__fill--hot {
+  background: var(--danger);
+}
+
+.usage__pct {
+  color: var(--text);
 }
 
 .spinner {
@@ -342,51 +521,339 @@ body {
 
 /* ---------------------------------------------------------------- composer */
 
-.composer {
+.contextrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   flex: none;
-  padding: 12px 22px 16px;
-  border-top: 1px solid var(--panel-edge);
+  width: 100%;
+  max-width: calc(var(--column) + 44px);
+  margin: 0 auto;
+  padding: 0 24px 6px;
 }
 
-.composer__box {
+.composer {
+  flex: none;
   width: 100%;
-  min-height: 42px;
-  max-height: 33vh;
-  padding: 10px 12px;
+  max-width: calc(var(--column) + 44px);
+  margin: 0 auto;
+  padding: 0 22px 18px;
+}
+
+/* One surface holding the text and everything that decides how it is
+   answered, so the box reads as the whole act of asking. */
+.composer__box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 11px 9px;
   border: 1px solid var(--panel-edge);
-  border-radius: 9px;
+  border-radius: 14px;
   background: var(--panel);
+}
+
+.composer__box:focus-within {
+  border-color: #3a3a3a;
+}
+
+.composer__box--off {
+  opacity: 0.7;
+}
+
+.composer__input {
+  width: 100%;
+  min-height: 24px;
+  max-height: 33vh;
+  padding: 2px 3px;
+  border: 0;
+  background: none;
   color: var(--text);
   font: inherit;
+  outline: none;
   resize: none;
   user-select: text;
 }
 
-.composer__box:focus {
-  border-color: var(--accent);
-  outline: none;
-}
-
-.composer__box:disabled {
+.composer__input::placeholder {
   color: var(--muted);
 }
 
-.composer__actions {
+.composer__tools {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 8px;
+  gap: 6px;
 }
 
-.composer__hint {
+.composer__send {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  border: 0;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #06201c;
+  cursor: pointer;
+}
+
+.composer__send:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+.composer__send:disabled {
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: default;
+}
+
+.composer__send--stop {
+  background: var(--blocked);
+  color: #2a1c00;
+}
+
+.composer__send--stop svg {
+  fill: currentColor;
+}
+
+/* ------------------------------------------------------------------- chips */
+
+.pop {
+  position: relative;
+  flex: none;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.chip:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+
+.chip:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.chip__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip__chevron {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* The working folder, which is a fact rather than a control, so it is quieter
+   than the chips inside the box. */
+.chip--path {
+  min-width: 0;
   color: var(--muted);
   font-size: 11px;
 }
 
-.button--stop {
-  border-color: var(--blocked);
+.chip--path:hover {
+  color: var(--text);
+}
+
+.pop__menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  width: 330px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 12px;
+  background: var(--panel-2);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.5);
+}
+
+.pop__search {
+  width: 100%;
+  margin-bottom: 6px;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--panel-edge);
+  border-radius: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+  user-select: text;
+}
+
+.pop__search::placeholder {
+  color: var(--muted);
+}
+
+.pop__section {
+  padding: 8px 8px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.pop__note {
+  margin: 4px 8px 8px;
+  font-size: 12px;
+}
+
+/* One model, or one effort level. The tick column is always present so the
+   names line up whether or not anything is selected. */
+.pop__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 0 8px 0 0;
+  border-radius: 8px;
+}
+
+.pop__row:hover {
+  background: var(--panel);
+}
+
+.pop__row--button {
+  padding: 7px 10px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.pop__row--chosen .pop__row-name {
+  color: var(--accent);
+}
+
+.pop__pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.pop__row-name {
+  flex: 1;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pop__star {
+  flex: none;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--panel-edge);
+  cursor: pointer;
+}
+
+.pop__row:hover .pop__star {
+  color: var(--muted);
+}
+
+.pop__star:hover,
+.pop__star--on {
   color: var(--blocked);
+}
+
+.pop__mark {
+  display: flex;
+  flex: none;
+  width: 12px;
+  color: var(--accent);
+}
+
+.pop__tick {
+  flex: none;
+  color: var(--accent);
+}
+
+.pop__tag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.pop__custom {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--panel-edge);
+}
+
+.pop__input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 9px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  user-select: text;
+}
+
+.pop__input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.pop__refresh {
+  display: block;
+  margin: 8px 2px 0;
+}
+
+/* A row of pills does not need the model menu's width. */
+.pop__menu--narrow {
+  left: auto;
+  right: 0;
+  width: auto;
+  min-width: 190px;
+  padding: 4px;
 }
 
 /* --------------------------------------------------------- agents screen */
@@ -592,7 +1059,6 @@ body {
 }
 
 .linkish {
-  margin-top: 9px;
   padding: 0;
   border: 0;
   background: none;
@@ -665,15 +1131,55 @@ body {
   outline-offset: 2px;
 }
 
+/* Text fields already say they are focused, with a caret and a border of their
+   own. The ring is a second and louder answer to a question that has been
+   answered, and on the composer -- focused for as long as you are typing -- it
+   never goes away. */
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
+}
+
+.starters {
+  display: flex;
+  gap: 6px;
+}
+
+.starter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.starter span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.starter:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.starter:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.6;
+}
+
 .starter--chosen {
   border-color: var(--accent);
   color: var(--accent);
-}
-
-.session--draft {
-  display: block;
-  cursor: default;
-  opacity: 0.85;
 }
 
 /* ---------------------------------------------------------------- markdown */
@@ -780,8 +1286,8 @@ body {
   display: flex;
   align-items: baseline;
   gap: 9px;
-  max-width: 760px;
-  padding: 5px 13px;
+  padding: 3px 0 3px 10px;
+  max-width: 100%;
   border-left: 2px solid var(--panel-edge);
   color: var(--muted);
   font-size: 13px;
@@ -844,7 +1350,9 @@ body {
   align-items: center;
   gap: 14px;
   flex: none;
-  margin: 0 22px;
+  width: 100%;
+  max-width: calc(var(--column) + 44px);
+  margin: 0 auto;
   padding: 10px 14px;
   border: 1px solid var(--blocked);
   border-radius: 9px;
@@ -899,4 +1407,57 @@ body {
 
 .button--deny {
   border-color: var(--panel-edge);
+}
+
+/* ------------------------------------------------------------ search hits */
+
+.results {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.result {
+  display: block;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.result:hover {
+  background: var(--panel);
+}
+
+.result__title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.result__snippet {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result__meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }

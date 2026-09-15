@@ -1970,6 +1970,7 @@ dependencies = [
 name = "kitty"
 version = "0.1.0"
 dependencies = [
+ "kitty-catalog",
  "kitty-core",
  "kitty-engine",
  "kitty-probe",
@@ -1980,6 +1981,17 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+]
+
+[[package]]
+name = "kitty-catalog"
+version = "0.1.0"
+dependencies = [
+ "kitty-core",
+ "kitty-harness",
+ "kitty-probe",
+ "kitty-supervisor",
+ "serde_json",
 ]
 
 [[package]]

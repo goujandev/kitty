@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use kitty_core::{HarnessId, InstallState, Scan};
+use kitty_core::{HarnessId, InstallState, ModelCatalog, Scan};
 use kitty_engine::{Session, SessionSpec};
 use kitty_probe::EnvSnapshot;
 use kitty_store::{Block, Hit, Project, SessionRow, Store};
@@ -123,6 +123,195 @@ fn list_projects(state: State<'_, AppState>) -> Result<Vec<Project>, String> {
         .map_err(|e| fail("could not list projects", e))
 }
 
+/// Projects with their session counts, for the projects screen.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectSummary {
+    #[serde(flatten)]
+    project: Project,
+    session_count: i64,
+    /// False when the folder has been moved or deleted since it was opened.
+    exists: bool,
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn list_project_summaries(state: State<'_, AppState>) -> Result<Vec<ProjectSummary>, String> {
+    let projects = state
+        .store
+        .list_projects()
+        .map_err(|e| fail("could not list projects", e))?;
+    let counts = state.store.session_counts().unwrap_or_default();
+
+    Ok(projects
+        .into_iter()
+        .map(|project| ProjectSummary {
+            session_count: counts
+                .iter()
+                .find(|(id, _)| *id == project.id)
+                .map_or(0, |(_, n)| *n),
+            // Told plainly rather than discovered when a session fails to
+            // start in a folder that is no longer there.
+            exists: PathBuf::from(&project.root).is_dir(),
+            project,
+        })
+        .collect())
+}
+
+/// Forgets a project and every conversation in it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn remove_project(state: State<'_, AppState>, project_id: String) -> Result<(), String> {
+    // Stop anything running in it first, or its CLI would outlive the rows.
+    if let Ok(sessions) = state.store.list_sessions(&project_id) {
+        if let Ok(mut live) = state.live.lock() {
+            for session in sessions {
+                live.remove(&session.id);
+            }
+        }
+    }
+    state
+        .store
+        .delete_project(&project_id)
+        .map_err(|e| fail("could not remove that project", e))
+}
+
+// ------------------------------------------------------------------- models
+
+/// How long a cached model list is trusted before being refreshed.
+const CATALOG_TTL_MS: i64 = 24 * 60 * 60 * 1000;
+
+fn catalog_key(harness: HarnessId) -> String {
+    format!("catalog:{harness}")
+}
+
+/// Lists the models a harness can run.
+///
+/// Served from cache unless `refresh` is set, the cache is older than a day,
+/// or the CLI has been upgraded since it was written. A new CLI version is the
+/// most likely reason a model is missing, so its version stamps the cache.
+#[tauri::command]
+async fn list_models(
+    state: State<'_, AppState>,
+    harness: String,
+    refresh: bool,
+) -> Result<ModelCatalog, String> {
+    let harness = parse_harness(&harness)?;
+
+    let env = EnvSnapshot::capture();
+    let status = kitty_probe::probe_one(harness, &env);
+    let InstallState::Found { path, version } = &status.install else {
+        return Err(format!(
+            "{} is not available: {}",
+            status.label,
+            status
+                .hint
+                .map_or_else(|| "unknown reason".to_owned(), |h| h.message)
+        ));
+    };
+    let version = version.to_string();
+
+    if !refresh {
+        if let Some(cached) = cached_catalog(&state.store, harness, &version) {
+            return Ok(cached);
+        }
+    }
+
+    let path = path.clone();
+    let store = Arc::clone(&state.store);
+    let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
+    let stamp = version.clone();
+
+    let catalog = tauri::async_runtime::spawn_blocking(move || {
+        kitty_catalog::probe(harness, std::path::Path::new(&path), &cwd, &stamp)
+    })
+    .await
+    .map_err(|e| fail("the model probe did not finish", e))?
+    .map_err(|e| fail("could not list models", e))?;
+
+    if let Ok(json) = serde_json::to_string(&catalog) {
+        let _ = store.set_setting("catalog", "", &catalog_key(harness), &json);
+    }
+    Ok(catalog)
+}
+
+/// Returns a cached list, if it is still trustworthy.
+fn cached_catalog(
+    store: &kitty_store::Store,
+    harness: HarnessId,
+    version: &str,
+) -> Option<ModelCatalog> {
+    let raw = store.setting("catalog", "", &catalog_key(harness)).ok()??;
+    let catalog: ModelCatalog = serde_json::from_str(&raw).ok()?;
+
+    if catalog.cli_version != version {
+        return None;
+    }
+    if kitty_store::now_ms() - catalog.fetched_at_ms > CATALOG_TTL_MS {
+        return None;
+    }
+    Some(catalog)
+}
+
+/// Models the user has starred, newest first.
+///
+/// Kept per harness, in the settings table, rather than in the catalog: the
+/// catalog is a cache of what the CLI reports and is thrown away whenever the
+/// CLI is upgraded, which is not a reason to lose a preference.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn favourite_models(state: State<'_, AppState>, harness: String) -> Result<Vec<String>, String> {
+    let harness = parse_harness(&harness)?;
+    Ok(read_favourites(&state.store, harness))
+}
+
+/// Stars a model, or unstars one already starred. Returns the new list.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn toggle_favourite_model(
+    state: State<'_, AppState>,
+    harness: String,
+    model: String,
+) -> Result<Vec<String>, String> {
+    let harness = parse_harness(&harness)?;
+    let mut ids = read_favourites(&state.store, harness);
+
+    if let Some(at) = ids.iter().position(|id| *id == model) {
+        ids.remove(at);
+    } else {
+        ids.push(model);
+    }
+
+    let json = serde_json::to_string(&ids).map_err(|e| fail("could not save that", e))?;
+    state
+        .store
+        .set_setting("favourites", "", &favourites_key(harness), &json)
+        .map_err(|e| fail("could not save that", e))?;
+    Ok(ids)
+}
+
+fn favourites_key(harness: HarnessId) -> String {
+    format!("models:{harness}")
+}
+
+/// A preference is not worth an error banner, so a failure reads as "none".
+fn read_favourites(store: &kitty_store::Store, harness: HarnessId) -> Vec<String> {
+    store
+        .setting("favourites", "", &favourites_key(harness))
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn parse_harness(raw: &str) -> Result<HarnessId, String> {
+    match raw {
+        "claude" => Ok(HarnessId::Claude),
+        "codex" => Ok(HarnessId::Codex),
+        other => Err(format!("unknown harness {other}")),
+    }
+}
+
 // ----------------------------------------------------------------- sessions
 
 #[allow(clippy::needless_pass_by_value)]
@@ -212,6 +401,7 @@ fn start_session(
     let mut spec = SessionSpec::new(harness, path, &project.root);
     spec.resume.clone_from(&row.provider_session);
     spec.model.clone_from(&row.model);
+    spec.effort.clone_from(&row.effort);
 
     let (session, events) =
         Session::start(&spec).map_err(|e| fail("could not start the agent", e))?;
@@ -256,6 +446,37 @@ fn send_turn(state: State<'_, AppState>, session_id: String, text: String) -> Re
     } else {
         Err("the agent stopped accepting input".to_owned())
     }
+}
+
+/// Changes the model a session uses from now on.
+///
+/// Claude takes the model as a launch flag, so the CLI is restarted. History
+/// is not lost: the session resumes by its provider id, which was recorded the
+/// first time it started.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn set_session_model(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    model: String,
+    effort: Option<String>,
+) -> Result<(), String> {
+    state
+        .store
+        .set_model_choice(&session_id, &model, effort.as_deref())
+        .map_err(|e| fail("could not save the model choice", e))?;
+
+    {
+        let mut live = state
+            .live
+            .lock()
+            .map_err(|_| "the session registry was poisoned".to_owned())?;
+        // Dropping it kills the CLI and its process tree.
+        live.remove(&session_id);
+    }
+
+    start_session(app, state, session_id)
 }
 
 /// Answers a permission request the agent raised.
@@ -357,6 +578,12 @@ pub fn run() {
             open_project,
             list_projects,
             prune_sessions,
+            list_project_summaries,
+            remove_project,
+            list_models,
+            favourite_models,
+            toggle_favourite_model,
+            set_session_model,
             list_sessions,
             create_session,
             session_blocks,

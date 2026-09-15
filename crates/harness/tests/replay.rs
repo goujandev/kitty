@@ -61,6 +61,7 @@ fn replay(id: HarnessId, harness: &str) -> Replay {
         cwd: r"C:\GitHub\kitty".into(),
         resume: None,
         model: None,
+        effort: None,
     });
 
     for frame in fixture(harness) {
@@ -267,6 +268,7 @@ fn replay_tools(id: HarnessId, harness: &str) -> Vec<SessionEvent> {
         cwd: r"C:\GitHub\kitty".into(),
         resume: None,
         model: None,
+        effort: None,
     });
 
     let mut events = Vec::new();
@@ -392,6 +394,7 @@ fn answering_an_unknown_request_is_harmless() {
             cwd: r"C:\work".into(),
             resume: None,
             model: None,
+            effort: None,
         });
         // Claude echoes any id back; Codex only answers ones it issued. Both
         // must simply not panic, because a double-click will do this.

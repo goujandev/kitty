@@ -7,6 +7,7 @@
 
 mod event;
 mod harness;
+mod model;
 mod status;
 mod version;
 
@@ -15,5 +16,6 @@ pub use event::{
     RateLimitWindow, SessionEvent, StopReason, ToolStatus, TranscriptEvent, Usage,
 };
 pub use harness::{HarnessDescriptor, HarnessId, CLAUDE, CODEX};
+pub use model::{ModelCatalog, ModelInfo};
 pub use status::{HarnessStatus, Hint, InstallState, LoginState, Scan};
 pub use version::Version;

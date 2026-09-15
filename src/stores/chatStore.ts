@@ -18,6 +18,7 @@ import {
   type ApprovalKind,
   type Block,
   type HarnessId,
+  type ModelCatalog,
   type Project,
   type RateLimitWindow,
   type SessionRow,
@@ -65,6 +66,23 @@ export interface ChatState {
    * answered, so it is shown prominently rather than as a notification.
    */
   approval: PendingApproval | null;
+  /** Model lists, per harness, once asked for. */
+  catalogs: Partial<Record<HarnessId, ModelCatalog>>;
+  /** Starred model ids, per harness. */
+  favourites: Partial<Record<HarnessId, string[]>>;
+  /**
+   * The model the CLI says it resolved to.
+   *
+   * Display only. It is the full name, while the catalog is keyed by the
+   * shorter id you ask for, so the two must not be confused.
+   */
+  runningModel: string | null;
+  /**
+   * A model chosen for a draft, applied when the session is created.
+   *
+   * A draft has no session to configure yet, so the choice is held here.
+   */
+  draftModel: { model: string; effort: string | null } | null;
   error: string | null;
   loading: boolean;
 }
@@ -82,6 +100,10 @@ const EMPTY: ChatState = {
   context: null,
   limits: [],
   approval: null,
+  catalogs: {},
+  favourites: {},
+  runningModel: null,
+  draftModel: null,
   error: null,
   loading: false,
 };
@@ -128,6 +150,48 @@ export async function chooseProject(): Promise<void> {
   }
 }
 
+/** Opens a folder kitty already knows about. */
+export async function openByRoot(root: string): Promise<void> {
+  try {
+    await useProject(await ipc.openProject(root));
+  } catch (error) {
+    set({ error: message(error) });
+  }
+}
+
+/**
+ * Jumps to one conversation, switching project first if it is in another one.
+ *
+ * Used by search, where a hit can be anywhere.
+ */
+export async function openSessionAnywhere(
+  projectId: string,
+  sessionId: string,
+): Promise<void> {
+  try {
+    if (state.project?.id !== projectId) {
+      const project = (await ipc.listProjects()).find((p) => p.id === projectId);
+      if (!project) return;
+      // Deliberately not `useProject`: that would open the newest session, and
+      // the point here is to open a specific one.
+      set({
+        project,
+        error: null,
+        draft: null,
+        draftModel: null,
+        limits: [],
+        usage: null,
+        context: null,
+        approval: null,
+      });
+      set({ sessions: await ipc.listSessions(projectId) });
+    }
+    await openSession(sessionId);
+  } catch (error) {
+    set({ error: message(error) });
+  }
+}
+
 export async function restoreLastProject(): Promise<void> {
   try {
     const projects = await ipc.listProjects();
@@ -166,8 +230,10 @@ async function useProject(project: Project): Promise<void> {
  */
 export function newSession(harness: HarnessId): void {
   if (!state.project) return;
+  void loadModels(harness);
   set({
     draft: harness,
+    draftModel: null,
     activeId: null,
     blocks: [],
     busy: false,
@@ -186,6 +252,7 @@ export async function openSession(sessionId: string): Promise<void> {
   set({
     activeId: sessionId,
     draft: null,
+    draftModel: null,
     blocks: [],
     busy: false,
     status: null,
@@ -196,9 +263,13 @@ export async function openSession(sessionId: string): Promise<void> {
     // numbers into a Codex session is worse than showing none.
     limits: [],
     approval: null,
+    runningModel: null,
     error: null,
     loading: true,
   });
+
+  const harness = state.sessions.find((s) => s.id === sessionId)?.harness;
+  if (harness === "claude" || harness === "codex") void loadModels(harness);
 
   try {
     const blocks = await ipc.sessionBlocks(sessionId);
@@ -257,6 +328,19 @@ async function commitDraft(): Promise<string | null> {
     draft: null,
     sessions: [session, ...state.sessions],
   });
+
+  // A model chosen before the session existed is applied now, before the CLI
+  // starts, so it takes effect on the very first turn.
+  const chosen = state.draftModel;
+  if (chosen) {
+    await ipc
+      .setSessionModel(session.id, chosen.model, chosen.effort)
+      .catch(() => undefined);
+    set({ draftModel: null });
+    await refreshSessions();
+    return session.id;
+  }
+
   await ipc.startSession(session.id);
   return session.id;
 }
@@ -284,6 +368,109 @@ async function refreshSessions(): Promise<void> {
 function appendLocalBlock(block: Block): void {
   if (state.blocks.some((b) => b.seq === block.seq)) return;
   set({ blocks: [...state.blocks, block] });
+}
+
+/** The harness a new or open conversation will use, if any. */
+export function currentHarness(): HarnessId | null {
+  if (state.draft) return state.draft;
+  return state.sessions.find((s) => s.id === state.activeId)?.harness ?? null;
+}
+
+/** Fallback names, for before a model list has been fetched. */
+const HARNESS_LABEL: Record<HarnessId, string> = {
+  claude: "Claude",
+  codex: "Codex",
+};
+
+/**
+ * What to call the agent in the transcript.
+ *
+ * The model's name, not the harness's: "Claude Opus 5" says more than "Claude
+ * Code". Falls back through what the CLI resolved to and then the harness, so
+ * a message always has a speaker even before the catalog has loaded.
+ */
+export function agentName(): string {
+  const harness = currentHarness();
+  if (!harness) return "Agent";
+
+  const { model } = currentModel();
+  const models = state.catalogs[harness]?.models;
+  const entry = model
+    ? models?.find((m) => m.id === model)
+    : models?.find((m) => m.isDefault);
+
+  return entry?.displayName ?? model ?? state.runningModel ?? HARNESS_LABEL[harness];
+}
+
+/** The model choice in force, from the session or the pending draft. */
+export function currentModel(): { model: string | null; effort: string | null } {
+  if (state.draft) {
+    return {
+      model: state.draftModel?.model ?? null,
+      effort: state.draftModel?.effort ?? null,
+    };
+  }
+  const session = state.sessions.find((s) => s.id === state.activeId);
+  return { model: session?.model ?? null, effort: session?.effort ?? null };
+}
+
+/** Fetches a harness's model list, from cache unless `refresh`. */
+export async function loadModels(
+  harness: HarnessId,
+  refresh = false,
+): Promise<void> {
+  // Starred ids are a preference, not part of the catalog, so a failure to
+  // read them must not stop the models arriving.
+  void ipc
+    .favouriteModels(harness)
+    .then((ids) => set({ favourites: { ...state.favourites, [harness]: ids } }))
+    .catch(() => undefined);
+
+  try {
+    const catalog = await ipc.listModels(harness, refresh);
+    set({ catalogs: { ...state.catalogs, [harness]: catalog } });
+  } catch (error) {
+    set({ error: message(error) });
+  }
+}
+
+/** Stars a model, or unstars one already starred. */
+export async function toggleFavourite(
+  harness: HarnessId,
+  model: string,
+): Promise<void> {
+  try {
+    const ids = await ipc.toggleFavouriteModel(harness, model);
+    set({ favourites: { ...state.favourites, [harness]: ids } });
+  } catch (error) {
+    set({ error: message(error) });
+  }
+}
+
+/**
+ * Chooses a model.
+ *
+ * For an open session this restarts the CLI, which resumes its history. For a
+ * draft it is remembered and applied when the session is created.
+ */
+export async function chooseModel(
+  model: string,
+  effort: string | null,
+): Promise<void> {
+  if (state.draft) {
+    set({ draftModel: { model, effort } });
+    return;
+  }
+  const { activeId } = state;
+  if (!activeId) return;
+
+  set({ busy: false, notice: null, error: null });
+  try {
+    await ipc.setSessionModel(activeId, model, effort);
+    await refreshSessions();
+  } catch (error) {
+    set({ error: message(error) });
+  }
 }
 
 /** Answers the permission request on screen. */
@@ -317,6 +504,7 @@ function replaceBlock(seq: number, update: (block: Block) => Block): void {
 function apply(event: TranscriptEvent): void {
   switch (event.kind) {
     case "sessionReady":
+      set({ runningModel: event.model });
       return;
 
     case "blockAppended":

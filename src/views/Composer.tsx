@@ -5,15 +5,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *
  * Enter sends, Shift+Enter makes a newline, Escape stops a running turn. The
  * box grows with its content up to a cap, then scrolls.
+ *
+ * The model and effort chips sit inside the box rather than above it, because
+ * they are part of the same decision as what you are about to type: which
+ * agent, thinking how hard, answering this. `tools` is a slot rather than
+ * props so the composer stays unaware of what a model even is.
  */
 export function Composer({
   busy,
   disabled,
+  tools,
   onSend,
   onCancel,
 }: {
   busy: boolean;
   disabled: boolean;
+  /** Controls shown along the bottom of the box. */
+  tools?: React.ReactNode;
   onSend: (text: string) => void;
   onCancel: () => void;
 }): React.ReactElement {
@@ -48,44 +56,66 @@ export function Composer({
 
   return (
     <div className="composer">
-      <textarea
-        ref={box}
-        className="composer__box"
-        rows={1}
-        value={text}
-        disabled={disabled}
-        placeholder={disabled ? "Open a project first" : "Ask the agent something"}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            submit();
-            return;
+      <div className={`composer__box ${disabled ? "composer__box--off" : ""}`}>
+        <textarea
+          ref={box}
+          className="composer__input"
+          rows={1}
+          value={text}
+          disabled={disabled}
+          placeholder={
+            disabled ? "Open a project first" : "Ask anything, Enter to send"
           }
-          if (event.key === "Escape" && busy) {
-            event.preventDefault();
-            onCancel();
-          }
-        }}
-      />
-      <div className="composer__actions">
-        <span className="composer__hint">
-          {busy ? "Esc to stop" : "Enter to send, Shift+Enter for a new line"}
-        </span>
-        {busy ? (
-          <button type="button" className="button button--stop" onClick={onCancel}>
-            Stop
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="button"
-            disabled={disabled || !text.trim()}
-            onClick={submit}
-          >
-            Send
-          </button>
-        )}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              submit();
+              return;
+            }
+            if (event.key === "Escape" && busy) {
+              event.preventDefault();
+              onCancel();
+            }
+          }}
+        />
+
+        <div className="composer__tools">
+          {tools}
+          {busy ? (
+            <button
+              type="button"
+              className="composer__send composer__send--stop"
+              title="Stop (Esc)"
+              aria-label="Stop"
+              onClick={onCancel}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                <rect x="2.5" y="2.5" width="7" height="7" rx="1.5" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="composer__send"
+              title="Send (Enter)"
+              aria-label="Send"
+              disabled={disabled || !text.trim()}
+              onClick={submit}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+                <path
+                  d="M7 12V2.6M7 2.6 3 6.6M7 2.6l4 4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

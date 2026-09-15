@@ -97,6 +97,15 @@ CREATE VIRTUAL TABLE blocks_fts USING fts5(
 ALTER TABLE blocks ADD COLUMN meta TEXT;
 ",
     },
+    Migration {
+        version: 3,
+        name: "session_effort",
+        sql: r"
+-- Reasoning effort is chosen per session alongside the model, and both CLIs
+-- report which levels each model accepts.
+ALTER TABLE sessions ADD COLUMN effort TEXT;
+",
+    },
 ];
 
 /// Applies anything not yet recorded. Safe to call on every open.
@@ -164,7 +173,11 @@ mod tests {
     /// expected value deliberately.
     #[test]
     fn released_migrations_are_immutable() {
-        let expected: &[(i64, u64)] = &[(1, 0xfad9_77ac_286d_e926), (2, 0xef7a_aac6_fcfc_d9e1)];
+        let expected: &[(i64, u64)] = &[
+            (1, 0xfad9_77ac_286d_e926),
+            (2, 0xef7a_aac6_fcfc_d9e1),
+            (3, 0x2ee3_cea9_5d56_6d62),
+        ];
 
         assert_eq!(
             MIGRATIONS.len(),

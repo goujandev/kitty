@@ -40,6 +40,24 @@ struct Batch<'a> {
     events: &'a [TranscriptEvent],
 }
 
+/// Where a finished batch goes.
+///
+/// Exists so the block bookkeeping below can be tested without a window. It is
+/// the part that decides what a transcript *is*, and it was previously welded
+/// to `AppHandle` and therefore untestable.
+trait Sink: Send {
+    fn deliver(&self, session_id: &str, events: &[TranscriptEvent]);
+}
+
+impl Sink for AppHandle {
+    fn deliver(&self, session_id: &str, events: &[TranscriptEvent]) {
+        // Targeted at nothing in particular yet because there is one window.
+        // When there are several, this becomes `emit_to` so a webview does not
+        // deserialize another window's traffic (ARCHITECTURE.md §7).
+        let _ = self.emit(TRANSCRIPT_EVENT, &Batch { session_id, events });
+    }
+}
+
 /// A session the app is holding open.
 pub struct Live {
     pub session: Session,
@@ -52,7 +70,7 @@ pub type Registry = Arc<Mutex<HashMap<String, Live>>>;
 pub fn pump(app: AppHandle, store: Arc<Store>, session_id: String, events: Receiver<SessionEvent>) {
     std::thread::spawn(move || {
         Transcript {
-            app,
+            sink: app,
             store,
             session_id,
             open: HashMap::new(),
@@ -74,8 +92,8 @@ struct OpenBlock {
     dirty: bool,
 }
 
-struct Transcript {
-    app: AppHandle,
+struct Transcript<S: Sink> {
+    sink: S,
     store: Arc<Store>,
     session_id: String,
     /// At most one open block per kind: an assistant message and its reasoning
@@ -94,7 +112,7 @@ struct Transcript {
     last_emit: Instant,
 }
 
-impl Transcript {
+impl<S: Sink> Transcript<S> {
     fn run(mut self, events: &Receiver<SessionEvent>) {
         loop {
             match events.recv_timeout(EMIT_EVERY) {
@@ -122,9 +140,11 @@ impl Transcript {
                 if let Some(provider) = &provider_session {
                     let _ = self.store.set_provider_session(&self.session_id, provider);
                 }
-                if let Some(model) = &model {
-                    let _ = self.store.set_model(&self.session_id, model);
-                }
+                // Deliberately not persisted. This is the name the CLI
+                // resolved to, and the stored model is what the user asked
+                // for, which is what the catalog is keyed by. Overwriting one
+                // with the other makes the picker unable to find its own
+                // entry, and with it the model's effort levels.
                 self.pending.push(TranscriptEvent::SessionReady { model });
             }
 
@@ -262,42 +282,58 @@ impl Transcript {
     /// Appends streamed text to the open block of this kind, creating it if
     /// this is the first text of the turn.
     fn delta(&mut self, kind: BlockKind, text: &str) {
-        if !self.open.contains_key(&kind) {
-            let Ok(seq) = self.store.append_block(&self.session_id, kind, "") else {
-                return;
-            };
-            self.open.insert(
-                kind,
-                OpenBlock {
-                    seq,
-                    text: String::new(),
-                    last_persisted: Instant::now(),
-                    dirty: false,
-                },
-            );
-            self.pending.push(TranscriptEvent::BlockAppended {
-                seq,
-                block_kind: kind,
-                text: String::new(),
+        if let Some(block) = self.open.get_mut(&kind) {
+            block.text.push_str(text);
+            block.dirty = true;
+            self.pending.push(TranscriptEvent::BlockDelta {
+                seq: block.seq,
+                text: text.to_owned(),
             });
+
+            if block.last_persisted.elapsed() >= PERSIST_EVERY {
+                let (seq, text) = (block.seq, block.text.clone());
+                block.last_persisted = Instant::now();
+                block.dirty = false;
+                let _ = self.store.set_block_text(&self.session_id, seq, &text);
+            }
+            return;
         }
 
-        let Some(block) = self.open.get_mut(&kind) else {
+        // Nothing open for this kind, so this chunk would create the row. It
+        // does not get to unless it carries something.
+        //
+        // Claude opens a thinking block with an empty chunk. A row created for
+        // that has to be deleted again when the block closes, and because a
+        // sequence is `MAX(seq) + 1`, deleting it hands that number to the next
+        // block — after the frontend has already been told it belongs to
+        // something else. The answer then streams into the leftover row and is
+        // rendered as reasoning.
+        //
+        // An empty chunk carries no content, so skipping it loses nothing.
+        // Whitespace is not empty and still opens a block: Codex sends leading
+        // spaces as their own chunks.
+        if text.is_empty() {
+            return;
+        }
+
+        let Ok(seq) = self.store.append_block(&self.session_id, kind, text) else {
             return;
         };
-        block.text.push_str(text);
-        block.dirty = true;
-        self.pending.push(TranscriptEvent::BlockDelta {
-            seq: block.seq,
+        self.open.insert(
+            kind,
+            OpenBlock {
+                seq,
+                text: text.to_owned(),
+                last_persisted: Instant::now(),
+                // Written with its text, so there is nothing outstanding.
+                dirty: false,
+            },
+        );
+        self.pending.push(TranscriptEvent::BlockAppended {
+            seq,
+            block_kind: kind,
             text: text.to_owned(),
         });
-
-        if block.last_persisted.elapsed() >= PERSIST_EVERY {
-            let (seq, text) = (block.seq, block.text.clone());
-            block.last_persisted = Instant::now();
-            block.dirty = false;
-            let _ = self.store.set_block_text(&self.session_id, seq, &text);
-        }
     }
 
     /// Closes a block, preferring the harness's authoritative text.
@@ -320,20 +356,16 @@ impl Transcript {
             return;
         };
 
-        if let Some(text) = authoritative {
-            // The harness is authoritative about its own message, so a
-            // disagreement is resolved in its favour rather than papered over.
+        // The harness is authoritative about its own message, so a
+        // disagreement is resolved in its favour rather than papered over.
+        // Empty is the exception: it means the harness said nothing about this
+        // block, and throwing away what we streamed would leave a blank row
+        // that can no longer be removed.
+        if let Some(text) = authoritative.filter(|t| !t.is_empty()) {
             if text != block.text {
                 text.clone_into(&mut block.text);
                 block.dirty = true;
             }
-        }
-
-        if block.text.is_empty() {
-            let _ = self
-                .store
-                .discard_block_if_empty(&self.session_id, block.seq);
-            return;
         }
 
         if block.dirty {
@@ -380,14 +412,7 @@ impl Transcript {
         if self.pending.is_empty() {
             return;
         }
-        let batch = Batch {
-            session_id: &self.session_id,
-            events: &self.pending,
-        };
-        // Targeted at nothing in particular yet because there is one window.
-        // When there are several, this becomes `emit_to` so a webview does not
-        // deserialize another window's traffic (ARCHITECTURE.md §7).
-        let _ = self.app.emit(TRANSCRIPT_EVENT, &batch);
+        self.sink.deliver(&self.session_id, &self.pending);
         self.pending.clear();
     }
 }
@@ -406,5 +431,194 @@ fn stop_label(stop: &StopReason) -> &'static str {
         StopReason::Interrupted => "interrupted",
         StopReason::Failed { .. } => "failed",
         StopReason::Other { .. } => "other",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc::channel;
+
+    use kitty_core::StopReason;
+
+    use super::{
+        BlockKind, HashMap, Instant, SessionEvent, Sink, Store, Transcript, TranscriptEvent, Usage,
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// Collects batches instead of sending them to a window.
+    #[derive(Clone, Default)]
+    struct Recorder(Arc<Mutex<Vec<TranscriptEvent>>>);
+
+    impl Sink for Recorder {
+        fn deliver(&self, _session_id: &str, events: &[TranscriptEvent]) {
+            self.0
+                .lock()
+                .expect("recorder poisoned")
+                .extend_from_slice(events);
+        }
+    }
+
+    impl Recorder {
+        fn events(&self) -> Vec<TranscriptEvent> {
+            self.0.lock().expect("recorder poisoned").clone()
+        }
+    }
+
+    /// Feeds a turn through a real store and returns what the window saw.
+    fn run(events: Vec<SessionEvent>) -> (Recorder, Arc<Store>, String) {
+        let store = Arc::new(Store::in_memory().expect("store"));
+        let project = store
+            .open_project(std::path::Path::new("."))
+            .expect("project");
+        let session = store
+            .create_session(&project.id, "claude", None)
+            .expect("session")
+            .id;
+
+        let recorder = Recorder::default();
+        let (tx, rx) = channel();
+        for event in events {
+            tx.send(event).expect("send");
+        }
+        drop(tx);
+
+        Transcript {
+            sink: recorder.clone(),
+            store: Arc::clone(&store),
+            session_id: session.clone(),
+            open: HashMap::new(),
+            tools: HashMap::new(),
+            last_closed: HashMap::new(),
+            pending: Vec::new(),
+            usage: Usage::default(),
+            last_emit: Instant::now(),
+        }
+        .run(&rx);
+
+        (recorder, store, session)
+    }
+
+    fn appended(events: &[TranscriptEvent]) -> Vec<(i64, BlockKind)> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                TranscriptEvent::BlockAppended {
+                    seq, block_kind, ..
+                } => Some((*seq, *block_kind)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The bug this was written for: Claude opens a thinking block with an
+    /// empty chunk. Creating a row for it and deleting it again handed its
+    /// sequence to the answer, which the window then drew as reasoning.
+    #[test]
+    fn an_empty_reasoning_chunk_does_not_claim_a_sequence() {
+        let (recorder, store, session) = run(vec![
+            SessionEvent::ReasoningDelta {
+                text: String::new(),
+            },
+            SessionEvent::ReasoningDone,
+            SessionEvent::MessageDelta {
+                text: "Two files:".to_owned(),
+            },
+            SessionEvent::MessageDone {
+                text: "Two files:".to_owned(),
+            },
+            SessionEvent::TurnEnded {
+                stop: StopReason::EndTurn,
+            },
+        ]);
+
+        let events = recorder.events();
+        assert_eq!(
+            appended(&events),
+            vec![(0, BlockKind::Assistant)],
+            "the empty thinking chunk must not produce a row"
+        );
+
+        let blocks = store.blocks(&session).expect("blocks");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].kind, BlockKind::Assistant);
+        assert_eq!(blocks[0].text, "Two files:");
+    }
+
+    /// Every sequence the window is told about has to still mean the same
+    /// thing in the database afterwards.
+    #[test]
+    fn announced_sequences_match_the_stored_blocks() {
+        let (recorder, store, session) = run(vec![
+            SessionEvent::ReasoningDelta {
+                text: String::new(),
+            },
+            SessionEvent::ReasoningDelta {
+                text: "weighing it up".to_owned(),
+            },
+            SessionEvent::ReasoningDone,
+            SessionEvent::ToolStarted {
+                call_id: "call-1".to_owned(),
+                title: "Read main.rs".to_owned(),
+                name: "Read".to_owned(),
+            },
+            SessionEvent::ToolEnded {
+                call_id: "call-1".to_owned(),
+                status: kitty_core::ToolStatus::Ok,
+                detail: None,
+            },
+            SessionEvent::MessageDelta {
+                text: "Done.".to_owned(),
+            },
+            SessionEvent::MessageDone {
+                text: "Done.".to_owned(),
+            },
+            SessionEvent::TurnEnded {
+                stop: StopReason::EndTurn,
+            },
+        ]);
+
+        let announced = appended(&recorder.events());
+        let blocks = store.blocks(&session).expect("blocks");
+
+        assert_eq!(
+            announced,
+            vec![
+                (0, BlockKind::Reasoning),
+                (1, BlockKind::Tool),
+                (2, BlockKind::Assistant),
+            ]
+        );
+        assert_eq!(blocks.len(), announced.len());
+        for (seq, kind) in announced {
+            let stored = blocks
+                .iter()
+                .find(|b| b.seq == seq)
+                .unwrap_or_else(|| panic!("no block at {seq}"));
+            assert_eq!(stored.kind, kind, "sequence {seq} changed meaning");
+        }
+    }
+
+    /// Whitespace is content. Codex sends leading spaces as their own chunks,
+    /// and dropping one would silently join two words.
+    #[test]
+    fn a_whitespace_chunk_still_opens_a_block() {
+        let (recorder, store, session) = run(vec![
+            SessionEvent::MessageDelta {
+                text: " lovely".to_owned(),
+            },
+            SessionEvent::MessageDelta {
+                text: " day".to_owned(),
+            },
+            SessionEvent::TurnEnded {
+                stop: StopReason::EndTurn,
+            },
+        ]);
+
+        assert_eq!(
+            appended(&recorder.events()),
+            vec![(0, BlockKind::Assistant)]
+        );
+        let blocks = store.blocks(&session).expect("blocks");
+        assert_eq!(blocks[0].text, " lovely day");
     }
 }

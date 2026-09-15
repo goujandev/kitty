@@ -122,17 +122,35 @@ with reasoning effort where the CLI reports it. Type a model id the probe never
 returned and it still works.
 
 **What gets built:** the catalog probes for both CLIs, caching stamped with the
-CLI version, the seed list used only for first paint, per-model settings
-rendered generically, the custom model id path, model resolution that stores
-the CLI's own native id.
+CLI version, per-model settings rendered generically, and the custom model id
+path.
+
+**Status: done.** Claude answers a `list_models` control request on its normal
+stream; Codex answers a paginated `model/list`. Both were found by probing the
+installed CLIs, and both report effort levels per model, which the picker
+renders without knowing anything about either vendor. No seed list was needed
+in the end: the probes are fast enough (712 ms and 90 ms) to run when the menu
+is opened.
+
+One thing this got wrong first time, and it is worth remembering: the model you
+*ask* for and the model the CLI *resolves to* are different strings. Claude
+takes `sonnet` and reports `claude-sonnet-5`. Persisting the resolved name over
+the asked-for one made the picker unable to find its own entry, and with it the
+model's effort levels.
 
 ### S5 — projects
 
 **What you can do:** a real project selector. Open a folder, see your projects,
 reopen one and find its sessions. Rename, remove, search across conversations.
 
-**What gets built:** projects as first-class rows, the session list, FTS5
-search, per-project settings.
+**What gets built:** projects as first-class rows, the session list, and FTS5
+search.
+
+**Status: done.** A projects screen lists every folder with its conversation
+count, flags one whose folder has been moved or deleted, and can forget a
+project along with everything in it. Search runs across every conversation on
+each keystroke, because it is an index query rather than a scan, and a hit
+opens the conversation it came from even if that is in another project.
 
 **Why last:** it is organizational rather than technical, it is the cheapest
 work in the prototype, and it only becomes meaningful once there are sessions

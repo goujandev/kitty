@@ -17,6 +17,33 @@
     "reasoning",
     "tool"
   ],
+  "catalog": {
+    "cliVersion": "2.1.270",
+    "fetchedAtMs": 1757880000000,
+    "harness": "claude",
+    "models": [
+      {
+        "defaultEffort": "high",
+        "description": "Opus 5 with 1M context",
+        "displayName": "Default (recommended)",
+        "efforts": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "id": "default",
+        "isDefault": true
+      },
+      {
+        "defaultEffort": null,
+        "description": null,
+        "displayName": "Haiku",
+        "efforts": [],
+        "id": "haiku",
+        "isDefault": false
+      }
+    ]
+  },
   "harnessIds": [
     "claude",
     "codex"

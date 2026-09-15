@@ -12,7 +12,8 @@
 
 use kitty_core::{
     ApprovalKind, ApprovalOutcome, BlockKind, ErrorKind, HarnessId, HarnessStatus, InstallState,
-    LoginState, RateLimitWindow, Scan, StopReason, ToolStatus, TranscriptEvent, Usage, Version,
+    LoginState, ModelCatalog, ModelInfo, RateLimitWindow, Scan, StopReason, ToolStatus,
+    TranscriptEvent, Usage, Version,
 };
 use serde_json::json;
 
@@ -149,6 +150,34 @@ fn transcript_events() -> Vec<TranscriptEvent> {
     ]
 }
 
+/// A model list as a CLI actually reports one.
+fn sample_catalog() -> ModelCatalog {
+    ModelCatalog {
+        harness: HarnessId::Claude,
+        models: vec![
+            ModelInfo {
+                id: "default".into(),
+                display_name: "Default (recommended)".into(),
+                description: Some("Opus 5 with 1M context".into()),
+                efforts: vec!["low".into(), "medium".into(), "high".into()],
+                default_effort: Some("high".into()),
+                is_default: true,
+            },
+            ModelInfo {
+                id: "haiku".into(),
+                display_name: "Haiku".into(),
+                description: None,
+                // Haiku genuinely has no effort levels.
+                efforts: Vec::new(),
+                default_effort: None,
+                is_default: false,
+            },
+        ],
+        cli_version: "2.1.270".into(),
+        fetched_at_ms: 1_757_880_000_000,
+    }
+}
+
 fn sample_scan() -> Scan {
     Scan {
         harnesses: vec![
@@ -212,6 +241,7 @@ fn contract_matches_the_committed_file() {
         "stopReasons": stop_reasons(),
         "transcriptEvents": transcript_events(),
         "scan": sample_scan(),
+        "catalog": sample_catalog(),
     }))
     .expect("wire types must serialize")
         + "\n";

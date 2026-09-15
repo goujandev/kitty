@@ -1,14 +1,32 @@
 import { useEffect, useState } from "react";
 
-import { listen, restoreLastProject } from "./stores/chatStore";
-import { initialise } from "./stores/harnessStore";
+import {
+  chooseProject,
+  listen,
+  newSession,
+  openByRoot,
+  openSession,
+  openSessionAnywhere,
+  restoreLastProject,
+  useChat,
+} from "./stores/chatStore";
+import { initialise, useHarnessState } from "./stores/harnessStore";
+import { ChatRail } from "./views/ChatRail";
 import { ChatView } from "./views/ChatView";
 import { HarnessList } from "./views/HarnessList";
+import { ProjectRail } from "./views/ProjectRail";
 
-type Screen = "chat" | "agents";
-
+/**
+ * Three panes, left to right: the folders you work in, the conversations in
+ * the chosen folder, and the conversation itself.
+ *
+ * Nothing is behind a tab. Picking a project and picking a chat are one click
+ * each, and both stay on screen while you read the third pane.
+ */
 export function App(): React.ReactElement {
-  const [screen, setScreen] = useState<Screen>("chat");
+  const [agents, setAgents] = useState(false);
+  const chat = useChat();
+  const { scan } = useHarnessState();
 
   useEffect(() => {
     // Deliberately after first paint. Probing spawns child processes and an
@@ -25,27 +43,41 @@ export function App(): React.ReactElement {
 
   return (
     <div className="app">
-      <nav className="tabs">
-        <button
-          type="button"
-          className={`tab ${screen === "chat" ? "tab--active" : ""}`}
-          onClick={() => setScreen("chat")}
-        >
-          Chat
-        </button>
-        <button
-          type="button"
-          className={`tab ${screen === "agents" ? "tab--active" : ""}`}
-          onClick={() => setScreen("agents")}
-        >
-          Agents
-        </button>
-        <span className="tabs__note">
-          kitty reads your existing logins. It never writes to them.
-        </span>
-      </nav>
+      <ProjectRail
+        activeId={chat.project?.id ?? null}
+        showingAgents={agents}
+        onOpen={(root) => {
+          setAgents(false);
+          void openByRoot(root);
+        }}
+        onAdd={() => {
+          setAgents(false);
+          void chooseProject();
+        }}
+        onShowAgents={() => setAgents(true)}
+      />
 
-      {screen === "chat" ? <ChatView /> : <HarnessList />}
+      <ChatRail
+        projectName={chat.project?.name ?? null}
+        sessions={chat.sessions}
+        activeId={chat.activeId}
+        draft={chat.draft}
+        harnesses={scan?.harnesses ?? []}
+        onNewSession={(harness) => {
+          setAgents(false);
+          newSession(harness);
+        }}
+        onOpenSession={(id) => {
+          setAgents(false);
+          void openSession(id);
+        }}
+        onOpenAnywhere={(projectId, sessionId) => {
+          setAgents(false);
+          void openSessionAnywhere(projectId, sessionId);
+        }}
+      />
+
+      {agents ? <HarnessList /> : <ChatView />}
     </div>
   );
 }

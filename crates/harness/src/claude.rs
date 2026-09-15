@@ -501,6 +501,7 @@ mod tests {
             cwd: r"C:\work".into(),
             resume: None,
             model: None,
+            effort: None,
         }
     }
 

@@ -12,7 +12,9 @@ import type {
   Block,
   HarnessId,
   Hit,
+  ModelCatalog,
   Project,
+  ProjectSummary,
   Scan,
   SessionRow,
   TranscriptBatch,
@@ -51,9 +53,56 @@ export function listProjects(): Promise<Project[]> {
   return invoke<Project[]>("list_projects");
 }
 
+/** Projects with session counts, for the projects screen. */
+export function listProjectSummaries(): Promise<ProjectSummary[]> {
+  return invoke<ProjectSummary[]>("list_project_summaries");
+}
+
+/** Forgets a project and every conversation in it. */
+export function removeProject(projectId: string): Promise<void> {
+  return invoke<void>("remove_project", { projectId });
+}
+
 /** Drops sessions that were opened and never used. Returns how many. */
 export function pruneSessions(projectId: string): Promise<number> {
   return invoke<number>("prune_sessions", { projectId });
+}
+
+// ----------------------------------------------------------------- models
+
+/**
+ * Lists the models a harness can run.
+ *
+ * Served from a cache stamped with the CLI's version, so upgrading the CLI
+ * picks up models it added. `refresh` forces a fresh probe.
+ */
+export function listModels(
+  harness: HarnessId,
+  refresh = false,
+): Promise<ModelCatalog> {
+  return invoke<ModelCatalog>("list_models", { harness, refresh });
+}
+
+/** Model ids the user has starred, for this harness. */
+export function favouriteModels(harness: HarnessId): Promise<string[]> {
+  return invoke<string[]>("favourite_models", { harness });
+}
+
+/** Stars a model, or unstars one already starred. Returns the new list. */
+export function toggleFavouriteModel(
+  harness: HarnessId,
+  model: string,
+): Promise<string[]> {
+  return invoke<string[]>("toggle_favourite_model", { harness, model });
+}
+
+/** Changes a session's model. Restarts the CLI, resuming its history. */
+export function setSessionModel(
+  sessionId: string,
+  model: string,
+  effort: string | null,
+): Promise<void> {
+  return invoke<void>("set_session_model", { sessionId, model, effort });
 }
 
 // --------------------------------------------------------------- sessions

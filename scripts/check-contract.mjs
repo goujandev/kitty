@@ -53,6 +53,7 @@ walk(contract.loginStates);
 walk(contract.stopReasons);
 walk(contract.transcriptEvents);
 walk(contract.scan);
+walk(contract.catalog);
 
 // Harness ids are a bare string union rather than tagged objects.
 for (const id of contract.harnessIds ?? []) tags.add(id);

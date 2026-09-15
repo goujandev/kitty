@@ -1,12 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main window is allowed to do: its own commands, opening a vendor's documentation in the system browser, and the folder picker used to choose a project.",
+  "description": "What the main window is allowed to do: its own commands, opening a vendor's documentation in the system browser, the folder picker used to choose a project, and the four things a window with no title bar has to do for itself.",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
     "opener:allow-open-url",
     "dialog:allow-open"
   ]

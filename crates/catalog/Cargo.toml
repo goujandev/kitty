@@ -1,0 +1,19 @@
+[package]
+name = "kitty-catalog"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Asks each CLI which models it can run."
+
+[lints]
+workspace = true
+
+[dependencies]
+kitty-core = { workspace = true }
+kitty-harness = { workspace = true }
+kitty-supervisor = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+kitty-probe = { workspace = true }
