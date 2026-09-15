@@ -104,6 +104,10 @@ fn transcript_events() -> Vec<TranscriptEvent> {
             seq: 1,
             text: "Hello, lovely human.".into(),
         },
+        TranscriptEvent::PicturesAttached {
+            seq: 1,
+            paths: vec![r"C:\Users\you\.codex\generated_images\t\cat.png".into()],
+        },
         TranscriptEvent::ToolStatusChanged {
             seq: 2,
             status: ToolStatus::Ok,
@@ -283,7 +287,7 @@ fn every_variant_is_covered() {
     assert_eq!(stop_reasons().len(), 7, "add the new StopReason sample");
     assert_eq!(
         transcript_events().len(),
-        13,
+        14,
         "add the new TranscriptEvent sample"
     );
     assert_eq!(

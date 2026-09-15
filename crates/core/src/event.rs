@@ -443,6 +443,19 @@ pub enum TranscriptEvent {
         seq: i64,
         text: String,
     },
+    /// Pictures an agent produced during the turn, attached to the reply.
+    ///
+    /// Not part of the text, because the agent never says where they went:
+    /// Codex generates them with its own tool and writes them to
+    /// `~/.codex/generated_images/<thread>/`, then talks about the result as
+    /// if you could already see it. Which, until this event, you could not.
+    PicturesAttached {
+        /// The block they belong under -- the reply that was being written.
+        seq: i64,
+        /// Absolute paths. The host has already checked each one is a real
+        /// image inside an agent's own folder.
+        paths: Vec<String>,
+    },
     /// A tool row's outcome changed. The row itself arrived as a block.
     ToolStatusChanged {
         seq: i64,

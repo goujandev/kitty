@@ -11,7 +11,7 @@
 mod sessions;
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use kitty_core::{HarnessId, InstallState, ModelCatalog, Scan};
@@ -27,6 +27,114 @@ struct AppState {
     scan: Mutex<Option<Scan>>,
     store: Arc<Store>,
     live: Registry,
+}
+
+// -------------------------------------------------------------- pictures
+
+/// Where an agent is allowed to have put a picture we will show.
+///
+/// Codex generates images itself and writes them to
+/// `~/.codex/generated_images/<thread>/<call-id>.png`; Claude's tools and MCP
+/// servers write wherever they were pointed. The transcript is model output,
+/// so the path in it is model output too, and a path kitty will open on the
+/// strength of a sentence is a path the model chooses.
+///
+/// Hence a list. Nothing outside these roots is served, whatever the text
+/// says, so the worst a made-up path can do is fail to load.
+fn picture_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(home) = std::env::var_os("USERPROFILE") {
+        let home = PathBuf::from(home);
+        roots.push(home.join(".codex"));
+        roots.push(home.join(".claude"));
+    }
+    roots
+}
+
+/// Extensions a browser will actually draw. Not a MIME sniff: the point is to
+/// refuse to open anything that is not a picture, and the name is the cheapest
+/// place to decide that.
+fn picture_mime(path: &Path) -> Option<&'static str> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    IMAGE_TYPES
+        .iter()
+        .find(|(ext, _)| *ext == extension)
+        .map(|(_, mime)| *mime)
+}
+
+/// Whether kitty will show the file at `path`, and as what.
+///
+/// Both halves matter. The root check stops the transcript naming a file
+/// outside the agents' own folders; `canonicalize` is what makes it a check
+/// rather than a formality, since without it `...\.codex\..\..\secrets.png`
+/// passes a prefix test.
+fn servable_picture(path: &Path, roots: &[PathBuf]) -> Option<(PathBuf, &'static str)> {
+    let mime = picture_mime(path)?;
+    let real = std::fs::canonicalize(path).ok()?;
+    if !real.is_file() {
+        return None;
+    }
+    roots
+        .iter()
+        .filter_map(|root| std::fs::canonicalize(root).ok())
+        .any(|root| real.starts_with(&root))
+        .then_some((real, mime))
+}
+
+/// Serves one picture, or refuses.
+///
+/// The webview asks by path, so this is the boundary that decides. Everything
+/// it will not serve returns 404 rather than an explanation: a handler that
+/// says *why* it refused tells whatever asked which paths exist.
+fn picture_response(path: &str) -> tauri::http::Response<Vec<u8>> {
+    let refuse = || {
+        tauri::http::Response::builder()
+            .status(tauri::http::StatusCode::NOT_FOUND)
+            .body(Vec::new())
+            .unwrap_or_default()
+    };
+
+    let Ok(decoded) = percent_decode(path.trim_start_matches('/')) else {
+        return refuse();
+    };
+    let Some((real, mime)) = servable_picture(Path::new(&decoded), &picture_roots()) else {
+        return refuse();
+    };
+    let Ok(bytes) = std::fs::read(&real) else {
+        return refuse();
+    };
+
+    tauri::http::Response::builder()
+        .status(tauri::http::StatusCode::OK)
+        .header(tauri::http::header::CONTENT_TYPE, mime)
+        // Named by absolute path, and the file at a given path is the one the
+        // agent just wrote, so it never changes under a given URL.
+        .header(
+            tauri::http::header::CACHE_CONTROL,
+            "max-age=31536000, immutable",
+        )
+        .body(bytes)
+        .unwrap_or_else(|_| refuse())
+}
+
+/// `%20` and friends, which the webview adds on the way out.
+fn percent_decode(text: &str) -> Result<String, std::str::Utf8Error> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3])?;
+            if let Ok(byte) = u8::from_str_radix(hex, 16) {
+                out.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    std::str::from_utf8(&out).map(str::to_owned)
 }
 
 /// Turns any error into something the frontend can show.
@@ -99,6 +207,64 @@ fn open_project(state: State<'_, AppState>, path: String) -> Result<Project, Str
     Ok(project)
 }
 
+/// Starts a conversation with no codebase behind it.
+///
+/// A project, in every way the rest of the app cares about, except that it has
+/// no folder: nothing is read from disk that was not typed into the box. This
+/// is the thing you reach for to ask a question, rather than opening a
+/// codebase you do not need and paying for its context to answer it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn new_chat(state: State<'_, AppState>) -> Result<Project, String> {
+    state
+        .store
+        .create_rootless_project("New chat")
+        .map_err(|e| fail("could not start a new chat", e))
+}
+
+/// Opens a project kitty already knows about, by id.
+///
+/// The rail has the whole row in hand, so it has no reason to hand back a path
+/// and make the host look it up again -- and a project with no folder has no
+/// path to hand back in the first place.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn open_stored_project(state: State<'_, AppState>, project_id: String) -> Result<Project, String> {
+    state
+        .store
+        .touch_project(&project_id)
+        .map_err(|e| fail("could not open that project", e))
+}
+
+/// Writes the order a rail was dragged into, top first.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn reorder_projects(state: State<'_, AppState>, ids: Vec<String>) -> Result<(), String> {
+    state
+        .store
+        .reorder_projects(&ids)
+        .map_err(|e| fail("could not save that order", e))
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn reorder_sessions(state: State<'_, AppState>, ids: Vec<String>) -> Result<(), String> {
+    state
+        .store
+        .reorder_sessions(&ids)
+        .map_err(|e| fail("could not save that order", e))
+}
+
+/// Forgets chats that were started and never used.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn prune_chats(state: State<'_, AppState>, keep: String) -> Result<usize, String> {
+    state
+        .store
+        .prune_empty_chats(&keep)
+        .map_err(|e| fail("could not tidy up empty chats", e))
+}
+
 /// Removes sessions in a project that were never used.
 ///
 /// Called whenever a project is opened, including when one is restored at
@@ -151,8 +317,12 @@ fn list_project_summaries(state: State<'_, AppState>) -> Result<Vec<ProjectSumma
                 .find(|(id, _)| *id == project.id)
                 .map_or(0, |(_, n)| *n),
             // Told plainly rather than discovered when a session fails to
-            // start in a folder that is no longer there.
-            exists: PathBuf::from(&project.root).is_dir(),
+            // start in a folder that is no longer there. A project with no
+            // folder has nothing that can go missing.
+            exists: project
+                .root
+                .as_ref()
+                .is_none_or(|root| PathBuf::from(root).is_dir()),
             project,
         })
         .collect())
@@ -181,8 +351,19 @@ fn remove_project(state: State<'_, AppState>, project_id: String) -> Result<(), 
 /// How long a cached model list is trusted before being refreshed.
 const CATALOG_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
+/// Bumped whenever kitty changes how it reads a CLI's answer.
+///
+/// The cache holds the *parsed* catalog, not the raw reply, so a change to the
+/// parsing does not show up until the entry expires a day later. That is how a
+/// fix to the model names shipped and then appeared not to have: the labels on
+/// screen were the ones written into the cache by the previous build.
+///
+/// The CLI version already stamps the cache from the other direction. This is
+/// the same idea pointed at ourselves.
+const CATALOG_FORMAT: u32 = 2;
+
 fn catalog_key(harness: HarnessId) -> String {
-    format!("catalog:{harness}")
+    format!("catalog:{CATALOG_FORMAT}:{harness}")
 }
 
 /// Lists the models a harness can run.
@@ -253,6 +434,108 @@ fn cached_catalog(
     Some(catalog)
 }
 
+/// How wide each rail is, in pixels.
+///
+/// Kept together in one setting because they are read and written together,
+/// and a layout half-restored is worse than one not restored at all.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy)]
+#[serde(rename_all = "camelCase")]
+struct RailWidths {
+    projects: f64,
+    chats: f64,
+}
+
+/// What the rails are without a saved answer, matching the stylesheet.
+const RAIL_DEFAULTS: RailWidths = RailWidths {
+    projects: 198.0,
+    chats: 248.0,
+};
+
+/// Narrow enough to be a list, wide enough to still be one.
+const RAIL_MIN: f64 = 150.0;
+const RAIL_MAX: f64 = 460.0;
+
+impl RailWidths {
+    fn clamped(self) -> Self {
+        let fix = |value: f64| {
+            if value.is_finite() {
+                value.clamp(RAIL_MIN, RAIL_MAX)
+            } else {
+                RAIL_DEFAULTS.projects
+            }
+        };
+        Self {
+            projects: fix(self.projects),
+            chats: fix(self.chats),
+        }
+    }
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn rail_widths(state: State<'_, AppState>) -> RailWidths {
+    state
+        .store
+        .setting("ui", "", "rail_widths")
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<RailWidths>(&raw).ok())
+        .map_or(RAIL_DEFAULTS, RailWidths::clamped)
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn set_rail_widths(state: State<'_, AppState>, widths: RailWidths) -> Result<(), String> {
+    let value =
+        serde_json::to_string(&widths.clamped()).map_err(|e| fail("could not save that", e))?;
+    state
+        .store
+        .set_setting("ui", "", "rail_widths", &value)
+        .map_err(|e| fail("could not save that", e))
+}
+
+/// The model a new conversation starts with.
+///
+/// Stored as `harness/model/effort`, because all three travel together: an
+/// effort level belongs to a model and a model belongs to a CLI, so keeping
+/// them in separate settings would let them drift into a combination that
+/// cannot run.
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ModelChoice {
+    harness: HarnessId,
+    model: String,
+    effort: Option<String>,
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn default_model(state: State<'_, AppState>) -> Option<ModelChoice> {
+    let raw = state.store.setting("ui", "", "default_model").ok()??;
+    serde_json::from_str(&raw).ok()
+}
+
+/// Sets, or with `None` clears, the model a new conversation starts with.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn set_default_model(
+    state: State<'_, AppState>,
+    choice: Option<ModelChoice>,
+) -> Result<(), String> {
+    let value = match &choice {
+        Some(choice) => {
+            serde_json::to_string(choice).map_err(|e| fail("could not save that", e))?
+        }
+        // Cleared rather than deleted: the settings table is keyed, and an
+        // empty value reads back as "nothing chosen" through the same path.
+        None => String::new(),
+    };
+    state
+        .store
+        .set_setting("ui", "", "default_model", &value)
+        .map_err(|e| fail("could not save that", e))
+}
+
 /// Models the user has starred, newest first.
 ///
 /// Kept per harness, in the settings table, rather than in the catalog: the
@@ -312,6 +595,221 @@ fn parse_harness(raw: &str) -> Result<HarnessId, String> {
     }
 }
 
+// --------------------------------------------------------------- appearance
+
+/// Image types the background accepts. Anything else is refused by name
+/// rather than copied and silently failing to render.
+const IMAGE_TYPES: [(&str, &str); 6] = [
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("webp", "image/webp"),
+    ("gif", "image/gif"),
+    ("bmp", "image/bmp"),
+];
+
+/// How the window is painted. Anything else is refused rather than stored and
+/// silently ignored by the frontend.
+const THEMES: [&str; 3] = ["system", "light", "dark"];
+
+/// The chosen theme, defaulting to following the OS.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn theme(state: State<'_, AppState>) -> String {
+    state
+        .store
+        .setting("ui", "", "theme")
+        .ok()
+        .flatten()
+        .filter(|value| THEMES.contains(&value.as_str()))
+        .unwrap_or_else(|| "system".to_owned())
+}
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn set_theme(state: State<'_, AppState>, theme: String) -> Result<(), String> {
+    if !THEMES.contains(&theme.as_str()) {
+        return Err(format!("{theme} is not a theme kitty has"));
+    }
+    state
+        .store
+        .set_setting("ui", "", "theme", &theme)
+        .map_err(|e| fail("could not save that", e))
+}
+
+/// How far the window is zoomed, as a factor. 1 is unscaled.
+///
+/// Stored rather than left to the webview's own Ctrl+/- handling, because the
+/// reason to change it is usually the monitor, and a monitor does not change
+/// between launches.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn zoom(state: State<'_, AppState>) -> f64 {
+    state
+        .store
+        .setting("ui", "", "zoom")
+        .ok()
+        .flatten()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|factor| (ZOOM_MIN..=ZOOM_MAX).contains(factor))
+        .unwrap_or(1.0)
+}
+
+/// The range the window is legible in. Below the floor the chrome stops being
+/// clickable; above the ceiling the three panes no longer fit side by side.
+const ZOOM_MIN: f64 = 0.5;
+const ZOOM_MAX: f64 = 2.5;
+
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn set_zoom(state: State<'_, AppState>, factor: f64) -> Result<f64, String> {
+    if !factor.is_finite() {
+        return Err("that is not a zoom level".to_owned());
+    }
+    let clamped = factor.clamp(ZOOM_MIN, ZOOM_MAX);
+    state
+        .store
+        .set_setting("ui", "", "zoom", &clamped.to_string())
+        .map_err(|e| fail("could not save that", e))?;
+    Ok(clamped)
+}
+
+/// Opens the picker for a background image. `None` means the user cancelled.
+#[tauri::command]
+async fn pick_image(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .add_filter("Images", &IMAGE_TYPES.map(|(ext, _)| ext))
+        .pick_file(move |picked| {
+            let _ = tx.send(picked);
+        });
+    let picked = tauri::async_runtime::spawn_blocking(move || rx.recv().ok().flatten())
+        .await
+        .map_err(|e| fail("the image picker failed", e))?;
+
+    Ok(picked
+        .and_then(|p| p.into_path().ok())
+        .map(|p| p.to_string_lossy().into_owned()))
+}
+
+/// The empty working directory for a conversation with no codebase.
+///
+/// One per project rather than one shared, so two chats cannot see each
+/// other's leftovers.
+fn scratch_dir(app: &tauri::AppHandle, project_id: &str) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| fail("could not find where to keep it", e))?
+        .join("chats")
+        .join(project_id);
+    std::fs::create_dir_all(&dir).map_err(|e| fail("could not create a working folder", e))?;
+    Ok(dir)
+}
+
+fn background_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| fail("could not find where to keep it", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| fail("could not create the data folder", e))?;
+    Ok(dir)
+}
+
+/// Adopts an image as the background.
+///
+/// The file is copied into kitty's own folder rather than referenced where it
+/// lies. A background that vanishes because the picture was moved out of
+/// Downloads is a puzzle the user should never have to solve.
+#[tauri::command]
+async fn set_background(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<String, String> {
+    let source = PathBuf::from(&path);
+    let extension = source
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+
+    let Some((_, mime)) = IMAGE_TYPES.iter().find(|(ext, _)| *ext == extension) else {
+        return Err(format!(
+            "{extension} is not an image kitty can show. Use a PNG, JPEG, WebP, GIF or BMP."
+        ));
+    };
+
+    let dir = background_dir(&app)?;
+    let destination = dir.join(format!("background.{extension}"));
+
+    // Clear any previous one first, or a PNG left behind would outlive the JPEG
+    // that replaced it.
+    remove_backgrounds(&dir);
+    std::fs::copy(&source, &destination).map_err(|e| fail("could not copy that image", e))?;
+
+    state
+        .store
+        .set_setting("ui", "", "background", &format!("background.{extension}"))
+        .map_err(|e| fail("could not remember that", e))?;
+
+    read_background(&destination, mime)
+}
+
+/// The background as a data URL, or `None` if there is not one.
+///
+/// A data URL rather than a file URL because the webview's content policy
+/// already allows `data:`; serving it over the asset protocol would mean
+/// granting the window filesystem reach it otherwise has no use for.
+// Tauri resolves these by value; the signature is not ours to choose.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn background(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let Ok(Some(name)) = state.store.setting("ui", "", "background") else {
+        return Ok(None);
+    };
+    let extension = name.rsplit('.').next().unwrap_or_default().to_owned();
+    let Some((_, mime)) = IMAGE_TYPES.iter().find(|(ext, _)| *ext == extension) else {
+        return Ok(None);
+    };
+
+    let path = background_dir(&app)?.join(&name);
+    if !path.is_file() {
+        return Ok(None);
+    }
+    read_background(&path, mime).map(Some)
+}
+
+// Tauri resolves these by value; the signature is not ours to choose.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn clear_background(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    if let Ok(dir) = background_dir(&app) {
+        remove_backgrounds(&dir);
+    }
+    state
+        .store
+        .set_setting("ui", "", "background", "")
+        .map_err(|e| fail("could not forget that", e))
+}
+
+fn remove_backgrounds(dir: &std::path::Path) {
+    for (extension, _) in IMAGE_TYPES {
+        let _ = std::fs::remove_file(dir.join(format!("background.{extension}")));
+    }
+}
+
+fn read_background(path: &std::path::Path, mime: &str) -> Result<String, String> {
+    use base64::Engine as _;
+
+    let bytes = std::fs::read(path).map_err(|e| fail("could not read that image", e))?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(format!("data:{mime};base64,{encoded}"))
+}
+
 // ----------------------------------------------------------------- sessions
 
 #[allow(clippy::needless_pass_by_value)]
@@ -337,6 +835,20 @@ fn create_session(
         .store
         .create_session(&project_id, &harness, None)
         .map_err(|e| fail("could not create a session", e))
+}
+
+/// Forgets one conversation and its transcript.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn delete_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+    // Stop the CLI first, or it outlives the rows it was writing into.
+    if let Ok(mut live) = state.live.lock() {
+        live.remove(&session_id);
+    }
+    state
+        .store
+        .delete_session(&session_id)
+        .map_err(|e| fail("could not delete that conversation", e))
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -398,7 +910,17 @@ fn start_session(
         return Err(format!("{} cannot run: {hint}", status.label));
     };
 
-    let mut spec = SessionSpec::new(harness, path, &project.root);
+    // A project with a folder runs in it. One without still needs a working
+    // directory -- the CLIs demand one, and anything the agent writes has to
+    // land somewhere -- so it gets an empty folder of its own under kitty's
+    // data directory. Deliberately not the user's home or the app's install
+    // dir: the whole promise of a chat with no codebase is that there is
+    // nothing around it to read.
+    let cwd = match &project.root {
+        Some(root) => PathBuf::from(root),
+        None => scratch_dir(&app, &project.id)?,
+    };
+    let mut spec = SessionSpec::new(harness, path, &cwd);
     spec.resume.clone_from(&row.provider_session);
     spec.model.clone_from(&row.model);
     spec.effort.clone_from(&row.effort);
@@ -571,11 +1093,35 @@ pub fn run() {
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // Pictures reach the webview as bytes over their own scheme rather
+        // than as base64 in the transcript. A 3MB render becomes 4MB of text
+        // in the database, in memory and across IPC if you inline it, and it
+        // has to be re-sent every time the row re-renders.
+        .register_uri_scheme_protocol("kitty", |_app, request| {
+            picture_response(request.uri().path())
+        })
         .invoke_handler(tauri::generate_handler![
             harness_snapshot,
             harness_rescan,
             pick_folder,
+            pick_image,
+            theme,
+            set_theme,
+            zoom,
+            set_zoom,
+            default_model,
+            set_default_model,
+            rail_widths,
+            set_rail_widths,
+            set_background,
+            background,
+            clear_background,
             open_project,
+            open_stored_project,
+            new_chat,
+            prune_chats,
+            reorder_projects,
+            reorder_sessions,
             list_projects,
             prune_sessions,
             list_project_summaries,
@@ -587,6 +1133,7 @@ pub fn run() {
             list_sessions,
             create_session,
             session_blocks,
+            delete_session,
             start_session,
             send_turn,
             respond_approval,
@@ -618,5 +1165,71 @@ pub fn run() {
         // message is here for `cargo run` and for a crash reporter later.
         eprintln!("kitty could not start: {error}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{picture_mime, servable_picture};
+    use std::path::{Path, PathBuf};
+
+    /// A folder standing in for `~/.codex`, with a picture and a secret in it.
+    fn sandbox() -> (PathBuf, PathBuf) {
+        let root = std::env::temp_dir().join(format!("kitty-pictures-{}", std::process::id()));
+        let inside = root.join("generated_images");
+        std::fs::create_dir_all(&inside).expect("create");
+        std::fs::write(inside.join("burger.png"), b"not really a png").expect("write");
+        std::fs::write(inside.join("auth.json"), b"{}").expect("write");
+        std::fs::write(root.join("secret.png"), b"x").expect("write");
+        (root, inside)
+    }
+
+    #[test]
+    fn a_picture_inside_an_allowed_root_is_served() {
+        let (root, inside) = sandbox();
+        let roots = vec![root.clone()];
+        assert!(servable_picture(&inside.join("burger.png"), &roots).is_some());
+    }
+
+    /// The path comes out of model output. Everything here is something a
+    /// transcript could claim, and none of it may be opened.
+    #[test]
+    fn nothing_outside_the_roots_is_served() {
+        let (root, inside) = sandbox();
+        let roots = vec![inside.clone()];
+
+        assert!(
+            servable_picture(&root.join("secret.png"), &roots).is_none(),
+            "a sibling of the allowed folder is still outside it"
+        );
+        assert!(
+            servable_picture(&inside.join("..").join("secret.png"), &roots).is_none(),
+            "a prefix test alone would pass this; canonicalize is what stops it"
+        );
+        assert!(
+            servable_picture(&inside.join("auth.json"), &roots).is_none(),
+            "inside the root, but not a picture"
+        );
+        assert!(
+            servable_picture(&inside.join("missing.png"), &roots).is_none(),
+            "a path that names nothing"
+        );
+        assert!(
+            servable_picture(&inside, &roots).is_none(),
+            "a directory is not a file"
+        );
+        assert!(
+            servable_picture(&inside.join("burger.png"), &[]).is_none(),
+            "no roots means nothing is servable"
+        );
+    }
+
+    #[test]
+    fn only_extensions_a_browser_can_draw_have_a_type() {
+        assert_eq!(picture_mime(Path::new("a/b.PNG")), Some("image/png"));
+        assert_eq!(picture_mime(Path::new("a/b.jpeg")), Some("image/jpeg"));
+        assert_eq!(picture_mime(Path::new("a/b.svg")), None, "scriptable");
+        assert_eq!(picture_mime(Path::new("a/b.exe")), None);
+        assert_eq!(picture_mime(Path::new("a/b")), None);
     }
 }

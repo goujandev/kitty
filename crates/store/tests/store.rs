@@ -154,27 +154,77 @@ fn the_first_message_titles_the_session_and_later_ones_do_not() {
 }
 
 #[test]
-fn sessions_list_most_recently_updated_first() {
+fn a_list_stays_where_it_was_put() {
     let store = store();
     let project = store
         .open_project(std::path::Path::new(r"C:\work\kitty"))
         .expect("project");
 
-    let older = store
+    let first = store
         .create_session(&project.id, "claude", None)
-        .expect("older");
-    let newer = store
+        .expect("first");
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let second = store
         .create_session(&project.id, "codex", None)
-        .expect("newer");
+        .expect("second");
 
-    // Touching the older session should float it to the top.
+    // Newest at the top to begin with.
+    let listed = store.list_sessions(&project.id).expect("list");
+    assert_eq!(listed[0].id, second.id);
+
+    // Talking in the older one used to float it to the top, which is the
+    // behaviour this replaces: a list that reshuffles while you are reading it
+    // cannot be learned.
     store
-        .append_block(&older.id, BlockKind::User, "ping")
+        .append_block(&first.id, BlockKind::User, "ping")
         .expect("touch");
 
     let listed = store.list_sessions(&project.id).expect("list");
-    assert_eq!(listed[0].id, older.id);
-    assert_eq!(listed[1].id, newer.id);
+    assert_eq!(listed[0].id, second.id, "using one must not move it");
+    assert_eq!(listed[1].id, first.id);
+
+    // It moves when, and only when, it is moved.
+    store
+        .reorder_sessions(&[first.id.clone(), second.id.clone()])
+        .expect("reorder");
+    let listed = store.list_sessions(&project.id).expect("list");
+    assert_eq!(listed[0].id, first.id);
+    assert_eq!(listed[1].id, second.id);
+}
+
+#[test]
+fn opening_a_project_does_not_move_it() {
+    let store = store();
+    let a = store
+        .open_project(std::path::Path::new(r"C:\one"))
+        .expect("a");
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let b = store
+        .open_project(std::path::Path::new(r"C:\two"))
+        .expect("b");
+
+    let listed = store.list_projects().expect("list");
+    assert_eq!(listed[0].id, b.id, "newest first to begin with");
+
+    store.touch_project(&a.id).expect("open the older one");
+    let listed = store.list_projects().expect("list");
+    assert_eq!(listed[0].id, b.id, "opening one must not move it");
+
+    store
+        .reorder_projects(&[a.id.clone(), b.id.clone()])
+        .expect("reorder");
+    let listed = store.list_projects().expect("list");
+    assert_eq!(listed[0].id, a.id);
+    assert_eq!(listed[1].id, b.id);
+
+    // A project made after a hand-ordering still arrives at the top, or a new
+    // one would appear at the bottom of a long list and look like nothing
+    // happened.
+    let fresh = store
+        .open_project(std::path::Path::new(r"C:\three"))
+        .expect("c");
+    let listed = store.list_projects().expect("list");
+    assert_eq!(listed[0].id, fresh.id);
 }
 
 #[test]
@@ -445,4 +495,107 @@ fn session_counts_are_reported_per_project() {
     let find = |id: &str| counts.iter().find(|(p, _)| p == id).map(|(_, n)| *n);
     assert_eq!(find(&a.id), Some(2));
     assert_eq!(find(&b.id), Some(1));
+}
+
+// ------------------------------------------------- projects without a folder
+
+#[test]
+fn a_project_without_a_folder_is_not_keyed_on_one() {
+    let store = store();
+    let first = store.create_rootless_project("New chat").expect("first");
+    let second = store.create_rootless_project("New chat").expect("second");
+
+    assert_eq!(first.root, None);
+    assert_eq!(second.root, None);
+    // The old schema made `root` NOT NULL UNIQUE, which allowed exactly one of
+    // these and only if you gave it a fake path. Two identically named chats
+    // with nothing behind either is the normal case, not the edge case.
+    assert_ne!(first.id, second.id);
+    assert_eq!(store.list_projects().expect("list").len(), 2);
+}
+
+#[test]
+fn a_chat_takes_its_name_from_what_was_asked() {
+    let store = store();
+    let project = store.create_rootless_project("New chat").expect("project");
+    let session = store
+        .create_session(&project.id, "claude", None)
+        .expect("session");
+
+    store
+        .set_title_if_unset(&session.id, "how do i rotate a matrix")
+        .expect("title");
+
+    let named = store
+        .list_projects()
+        .expect("list")
+        .into_iter()
+        .find(|p| p.id == project.id)
+        .expect("still there");
+    assert_eq!(named.name, "how do i rotate a matrix");
+}
+
+#[test]
+fn a_folder_project_keeps_its_folder_name() {
+    let store = store();
+    let project = store
+        .open_project(std::path::Path::new(r"C:\code\kitty"))
+        .expect("project");
+    let session = store
+        .create_session(&project.id, "claude", None)
+        .expect("session");
+
+    store
+        .set_title_if_unset(&session.id, "why is the transcript empty")
+        .expect("title");
+
+    let named = store
+        .list_projects()
+        .expect("list")
+        .into_iter()
+        .find(|p| p.id == project.id)
+        .expect("still there");
+    assert_eq!(
+        named.name, "kitty",
+        "a folder project is named after its folder, not after one question"
+    );
+}
+
+#[test]
+fn pruning_takes_the_empty_chats_and_nothing_else() {
+    let store = store();
+    let empty = store.create_rootless_project("New chat").expect("empty");
+    let open_now = store.create_rootless_project("New chat").expect("open");
+    let used = store.create_rootless_project("New chat").expect("used");
+    let folder = store
+        .open_project(std::path::Path::new(r"C:\code\thing"))
+        .expect("folder");
+
+    store.create_session(&used.id, "claude", None).expect("s");
+
+    let removed = store.prune_empty_chats(&open_now.id).expect("prune");
+    assert_eq!(removed, 1);
+
+    let left: Vec<String> = store
+        .list_projects()
+        .expect("list")
+        .into_iter()
+        .map(|p| p.id)
+        .collect();
+    assert!(!left.contains(&empty.id), "an abandoned chat is swept");
+    assert!(left.contains(&open_now.id), "the one on screen is spared");
+    assert!(left.contains(&used.id), "a chat with a session is spared");
+    // An empty folder project is still a bookmark someone chose to keep.
+    assert!(left.contains(&folder.id), "folder projects are never swept");
+}
+
+#[test]
+fn opening_a_project_by_id_marks_it_opened() {
+    let store = store();
+    let project = store.create_rootless_project("New chat").expect("project");
+    std::thread::sleep(std::time::Duration::from_millis(2));
+
+    let reopened = store.touch_project(&project.id).expect("touch");
+    assert_eq!(reopened.id, project.id);
+    assert!(reopened.last_opened_at > project.last_opened_at);
 }

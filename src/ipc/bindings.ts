@@ -158,6 +158,14 @@ export type TranscriptEvent =
   | { kind: "blockAppended"; seq: number; blockKind: BlockKind; text: string }
   | { kind: "blockDelta"; seq: number; text: string }
   | { kind: "blockFinal"; seq: number; text: string }
+  /**
+   * Pictures the agent made during the turn, belonging under a reply.
+   *
+   * Absolute paths, already checked by the host. They are not in the message
+   * text: Codex writes them to its own folder and then talks about them as if
+   * you could already see them.
+   */
+  | { kind: "picturesAttached"; seq: number; paths: string[] }
   | {
       kind: "toolStatusChanged";
       seq: number;
@@ -189,7 +197,14 @@ export interface TranscriptBatch {
 
 export interface Project {
   id: string;
-  root: string;
+  /**
+   * The folder the agent runs in.
+   *
+   * Null for a project that is only a conversation: no codebase behind it, one
+   * session, and no conversations rail beside it because there is nothing to
+   * list.
+   */
+  root: string | null;
   name: string;
   createdAt: number;
   lastOpenedAt: number;
@@ -226,6 +241,25 @@ export interface ModelCatalog {
   models: ModelInfo[];
   cliVersion: string;
   fetchedAtMs: number;
+}
+
+/**
+ * A model, the CLI that runs it, and how hard it thinks.
+ *
+ * The three travel together everywhere they are stored or passed: an effort
+ * level belongs to a model and a model belongs to a CLI, so splitting them up
+ * lets them drift into a combination that cannot run.
+ */
+export interface ModelChoice {
+  harness: HarnessId;
+  model: string;
+  effort: string | null;
+}
+
+/** How wide each rail is, in pixels. Read and written as one thing. */
+export interface RailWidths {
+  projects: number;
+  chats: number;
 }
 
 /** A project with enough context to decide whether to keep it. */

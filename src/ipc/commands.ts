@@ -13,8 +13,10 @@ import type {
   HarnessId,
   Hit,
   ModelCatalog,
+  ModelChoice,
   Project,
   ProjectSummary,
+  RailWidths,
   Scan,
   SessionRow,
   TranscriptBatch,
@@ -45,8 +47,86 @@ export function pickFolder(): Promise<string | null> {
   return invoke<string | null>("pick_folder");
 }
 
+// ------------------------------------------------------------- appearance
+
+/** How the window is painted. */
+export type Theme = "system" | "light" | "dark";
+
+export function theme(): Promise<Theme> {
+  return invoke<Theme>("theme");
+}
+
+export function setTheme(next: Theme): Promise<void> {
+  return invoke<void>("set_theme", { theme: next });
+}
+
+/** How far the window is zoomed. 1 is unscaled. */
+export function zoom(): Promise<number> {
+  return invoke<number>("zoom");
+}
+
+/** Saves a zoom level, clamped by the host. Resolves with what was stored. */
+export function setZoom(factor: number): Promise<number> {
+  return invoke<number>("set_zoom", { factor });
+}
+
+/** How wide each rail is. Clamped by the host. */
+export function railWidths(): Promise<RailWidths> {
+  return invoke<RailWidths>("rail_widths");
+}
+
+export function setRailWidths(widths: RailWidths): Promise<void> {
+  return invoke<void>("set_rail_widths", { widths });
+}
+
+/** Opens the picker for a background image. Null means the user cancelled. */
+export function pickImage(): Promise<string | null> {
+  return invoke<string | null>("pick_image");
+}
+
+/**
+ * Adopts an image as the background, returning it as a data URL.
+ *
+ * The file is copied into kitty's own folder, so moving or deleting the
+ * original afterwards does not take the background with it.
+ */
+export function setBackground(path: string): Promise<string> {
+  return invoke<string>("set_background", { path });
+}
+
+/** The background as a data URL, or null if there is not one. */
+export function background(): Promise<string | null> {
+  return invoke<string | null>("background");
+}
+
+export function clearBackground(): Promise<void> {
+  return invoke<void>("clear_background");
+}
+
+// --------------------------------------------------------------- projects
+
 export function openProject(path: string): Promise<Project> {
   return invoke<Project>("open_project", { path });
+}
+
+/** Opens a project already in the list. Works with or without a folder. */
+export function openStoredProject(projectId: string): Promise<Project> {
+  return invoke<Project>("open_stored_project", { projectId });
+}
+
+/**
+ * Starts a conversation with no codebase behind it.
+ *
+ * It is a project like any other as far as the rest of the app is concerned;
+ * it just has no folder, so nothing is read from disk that was not typed in.
+ */
+export function newChat(): Promise<Project> {
+  return invoke<Project>("new_chat");
+}
+
+/** Forgets folderless chats that were opened and never used. */
+export function pruneChats(keep: string): Promise<number> {
+  return invoke<number>("prune_chats", { keep });
 }
 
 export function listProjects(): Promise<Project[]> {
@@ -56,6 +136,15 @@ export function listProjects(): Promise<Project[]> {
 /** Projects with session counts, for the projects screen. */
 export function listProjectSummaries(): Promise<ProjectSummary[]> {
   return invoke<ProjectSummary[]>("list_project_summaries");
+}
+
+/** Saves the order a rail was dragged into, top first. */
+export function reorderProjects(ids: string[]): Promise<void> {
+  return invoke<void>("reorder_projects", { ids });
+}
+
+export function reorderSessions(ids: string[]): Promise<void> {
+  return invoke<void>("reorder_sessions", { ids });
 }
 
 /** Forgets a project and every conversation in it. */
@@ -81,6 +170,16 @@ export function listModels(
   refresh = false,
 ): Promise<ModelCatalog> {
   return invoke<ModelCatalog>("list_models", { harness, refresh });
+}
+
+/** The model a new conversation starts with, or null if none is chosen. */
+export function defaultModel(): Promise<ModelChoice | null> {
+  return invoke<ModelChoice | null>("default_model");
+}
+
+/** Sets that model, or clears it with null. */
+export function setDefaultModel(choice: ModelChoice | null): Promise<void> {
+  return invoke<void>("set_default_model", { choice });
 }
 
 /** Model ids the user has starred, for this harness. */
@@ -116,6 +215,11 @@ export function createSession(
   harness: HarnessId,
 ): Promise<SessionRow> {
   return invoke<SessionRow>("create_session", { projectId, harness });
+}
+
+/** Forgets one conversation and its transcript. */
+export function deleteSession(sessionId: string): Promise<void> {
+  return invoke<void>("delete_session", { sessionId });
 }
 
 export function sessionBlocks(sessionId: string): Promise<Block[]> {

@@ -106,10 +106,119 @@ ALTER TABLE blocks ADD COLUMN meta TEXT;
 ALTER TABLE sessions ADD COLUMN effort TEXT;
 ",
     },
+    Migration {
+        version: 4,
+        name: "projects_without_a_folder",
+        sql: r"
+-- A project is a folder, or it is nothing at all. One with no root is a single
+-- conversation with nothing behind it: no codebase, no working directory worth
+-- the name, and so nothing for the agent to read that was not typed into it.
+--
+-- Rebuilt rather than altered, because `root` was declared NOT NULL and SQLite
+-- cannot relax that in place. This is the order the SQLite manual gives for
+-- rebuilding a table other tables point at: copy, drop, rename -- never rename
+-- first. A rename rewrites every foreign key that named the old table so it
+-- names the new one, which here would leave `sessions` pointing at the copy and
+-- dropping the copy would cascade every transcript in the database into
+-- nothing. The runner has foreign keys switched off around this.
+CREATE TABLE projects_new (
+    id             TEXT PRIMARY KEY,
+    root           TEXT UNIQUE,
+    name           TEXT NOT NULL,
+    created_at     INTEGER NOT NULL,
+    last_opened_at INTEGER NOT NULL
+);
+
+INSERT INTO projects_new (id, root, name, created_at, last_opened_at)
+    SELECT id, root, name, created_at, last_opened_at FROM projects;
+
+DROP TABLE projects;
+ALTER TABLE projects_new RENAME TO projects;
+",
+    },
+    Migration {
+        version: 5,
+        name: "repair_sessions_foreign_key",
+        sql: r"
+-- Repairs a database that ran the first version of migration 4.
+--
+-- That version renamed `projects` out of the way before building its
+-- replacement, and SQLite helpfully rewrote every foreign key naming it so
+-- they named the copy instead. `sessions` then pointed at `projects_old`, the
+-- copy was dropped, and the drop cascaded every session -- and through them
+-- every block and turn -- out of the database. What was left was a `sessions`
+-- table referencing a table that no longer existed, so creating a new one
+-- failed with `no such table: main.projects_old`.
+--
+-- The rows are gone and nothing here can bring them back. This puts the schema
+-- right so the app works again, and is a harmless rebuild on a database that
+-- never saw the bad version.
+CREATE TABLE sessions_new (
+    id               TEXT PRIMARY KEY,
+    project_id       TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    harness          TEXT NOT NULL,
+    model            TEXT,
+    provider_session TEXT,
+    title            TEXT,
+    created_at       INTEGER NOT NULL,
+    updated_at       INTEGER NOT NULL,
+    effort           TEXT
+);
+
+INSERT INTO sessions_new
+       (id, project_id, harness, model, provider_session, title,
+        created_at, updated_at, effort)
+    SELECT id, project_id, harness, model, provider_session, title,
+           created_at, updated_at, effort
+      FROM sessions;
+
+DROP TABLE sessions;
+ALTER TABLE sessions_new RENAME TO sessions;
+
+-- Dropped with the table it indexed.
+CREATE INDEX IF NOT EXISTS sessions_by_project
+    ON sessions(project_id, updated_at DESC);
+
+-- `blocks_fts` is a virtual table with no foreign key, so the cascade went
+-- around it and left rows describing conversations that no longer exist.
+-- Search would offer them and open nothing.
+DELETE FROM blocks_fts WHERE session_id NOT IN (SELECT id FROM sessions);
+",
+    },
+    Migration {
+        version: 6,
+        name: "manual_order",
+        sql: r"
+-- Lists stay where they are put.
+--
+-- Projects were ordered by `last_opened_at` and conversations by `updated_at`,
+-- so opening one or replying in one moved it. A list that reshuffles under the
+-- cursor cannot be learned: the row you were about to click is somewhere else
+-- by the time you get there.
+--
+-- Two plain ALTERs and two UPDATEs. No table is rebuilt and nothing references
+-- these columns, which after migration 4 is a property worth stating out loud.
+ALTER TABLE projects ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE sessions ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
+
+-- Seeded from creation time so the first ordering is the order things were
+-- made, newest first, and nothing appears to jump on the upgrade.
+UPDATE projects SET sort_order = created_at;
+UPDATE sessions SET sort_order = created_at;
+",
+    },
 ];
 
 /// Applies anything not yet recorded. Safe to call on every open.
 pub fn migrate(conn: &Connection) -> Result<()> {
+    migrate_through(conn, i64::MAX)
+}
+
+/// Applies everything up to and including `highest`.
+///
+/// The bound exists for the tests: a migration that rewrites a table can only
+/// be shown to carry the old rows across if the old rows are there first.
+fn migrate_through(conn: &Connection, highest: i64) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
              version    INTEGER PRIMARY KEY,
@@ -126,8 +235,21 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         )
         .unwrap_or(0);
 
+    // Off for the duration, on everywhere else, which is what the SQLite
+    // manual's table-rebuild procedure opens with. A migration that replaces a
+    // table has to drop the old one out from under the rows that reference it,
+    // and SQLite answers a DROP on a parent table by cascading its children
+    // into oblivion. Enforcement cannot be toggled inside a transaction, so it
+    // is toggled around the whole run.
+    conn.execute_batch("PRAGMA foreign_keys = OFF")?;
+    let result = apply(conn, applied, highest);
+    conn.execute_batch("PRAGMA foreign_keys = ON")?;
+    result
+}
+
+fn apply(conn: &Connection, applied: i64, highest: i64) -> Result<()> {
     for migration in MIGRATIONS {
-        if migration.version <= applied {
+        if migration.version <= applied || migration.version > highest {
             continue;
         }
         // One transaction per migration: a failure leaves the database at the
@@ -152,7 +274,7 @@ pub fn migrate(conn: &Connection) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{migrate, MIGRATIONS};
+    use super::{migrate, migrate_through, MIGRATIONS};
     use rusqlite::Connection;
 
     /// Cheap content hash. Not cryptographic; it only has to notice an edit.
@@ -177,6 +299,9 @@ mod tests {
             (1, 0xfad9_77ac_286d_e926),
             (2, 0xef7a_aac6_fcfc_d9e1),
             (3, 0x2ee3_cea9_5d56_6d62),
+            (4, 0xf898_216c_1d8a_28bc),
+            (5, 0xc76e_dc4c_7eab_a7b4),
+            (6, 0x927c_1f8b_f544_650e),
         ];
 
         assert_eq!(
@@ -230,6 +355,150 @@ mod tests {
                 .expect("query");
             assert_eq!(count, 1, "{table} is missing");
         }
+    }
+
+    /// The rebuild in migration 4 drops the table every session points at.
+    ///
+    /// This is the test that made it safe to write: a database is taken to
+    /// version 3, filled the way a real one would be, and then pushed the rest
+    /// of the way. If the pragmas were wrong the commit fails on a foreign key
+    /// and the rows are gone, which is a thing you want to find out here.
+    #[test]
+    fn the_project_rebuild_carries_sessions_across() {
+        let conn = Connection::open_in_memory().expect("open");
+        conn.execute_batch("PRAGMA foreign_keys = ON").expect("fk");
+        migrate_through(&conn, 3).expect("up to 3");
+
+        conn.execute_batch(
+            "INSERT INTO projects (id, root, name, created_at, last_opened_at)
+                 VALUES ('p1', 'C:\\code\\thing', 'thing', 1, 2);
+             INSERT INTO sessions (id, project_id, harness, created_at, updated_at)
+                 VALUES ('s1', 'p1', 'claude', 1, 2);
+             INSERT INTO blocks (session_id, seq, kind, text, created_at)
+                 VALUES ('s1', 0, 'user', 'still here?', 1);",
+        )
+        .expect("seed");
+
+        migrate(&conn).expect("the rebuild must not lose the folder projects");
+
+        let (root, name): (Option<String>, String) = conn
+            .query_row("SELECT root, name FROM projects WHERE id = 'p1'", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .expect("the project survived");
+        assert_eq!(root.as_deref(), Some("C:\\code\\thing"));
+        assert_eq!(name, "thing");
+
+        let text: String = conn
+            .query_row(
+                "SELECT b.text FROM blocks b
+                   JOIN sessions s ON s.id = b.session_id
+                  WHERE s.project_id = 'p1'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("the transcript survived");
+        assert_eq!(text, "still here?");
+
+        // The point of the whole exercise.
+        conn.execute_batch(
+            "INSERT INTO projects (id, root, name, created_at, last_opened_at)
+                 VALUES ('p2', NULL, 'image ideas', 1, 2);
+             INSERT INTO projects (id, root, name, created_at, last_opened_at)
+                 VALUES ('p3', NULL, 'why is my dns broken', 1, 2);",
+        )
+        .expect("a project with no folder, twice, because UNIQUE ignores NULL");
+
+        // And the cascade still reaches the blocks through the rebuilt table.
+        conn.execute("DELETE FROM projects WHERE id = 'p1'", [])
+            .expect("delete");
+        let left: i64 = conn
+            .query_row("SELECT COUNT(*) FROM blocks", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(left, 0, "the foreign key survived the swap");
+    }
+
+    /// Reproduces the database the first version of migration 4 produced, and
+    /// proves migration 5 makes it usable again.
+    ///
+    /// The symptom was `no such table: main.projects_old` on every attempt to
+    /// start a conversation, which is what a foreign key pointing at a table
+    /// that was dropped looks like from the outside.
+    #[test]
+    fn a_session_table_pointing_at_the_dropped_copy_is_repaired() {
+        let conn = Connection::open_in_memory().expect("open");
+        conn.execute_batch("PRAGMA foreign_keys = ON").expect("fk");
+        migrate_through(&conn, 4).expect("up to 4");
+
+        // Exactly the schema found in the wild: `sessions` naming a table that
+        // is not there, and no rows left because dropping it cascaded.
+        conn.execute_batch(
+            r#"PRAGMA foreign_keys = OFF;
+               DROP TABLE sessions;
+               CREATE TABLE sessions (
+                   id               TEXT PRIMARY KEY,
+                   project_id       TEXT NOT NULL
+                                    REFERENCES "projects_old"(id) ON DELETE CASCADE,
+                   harness          TEXT NOT NULL,
+                   model            TEXT,
+                   provider_session TEXT,
+                   title            TEXT,
+                   created_at       INTEGER NOT NULL,
+                   updated_at       INTEGER NOT NULL
+               , effort TEXT);
+               INSERT INTO projects (id, root, name, created_at, last_opened_at)
+                   VALUES ('p1', 'C:\left', 'left', 1, 2);
+               INSERT INTO sessions (id, project_id, harness, created_at, updated_at)
+                   VALUES ('s1', 'p1', 'claude', 1, 2);
+               INSERT INTO blocks_fts (text, session_id, seq)
+                   VALUES ('a conversation that is gone', 'ghost', 0);
+               PRAGMA foreign_keys = ON;"#,
+        )
+        .expect("break it the way it was broken");
+
+        // The failure the user saw, before the repair.
+        let before = conn.execute(
+            "INSERT INTO sessions (id, project_id, harness, created_at, updated_at)
+                 VALUES ('s2', 'p1', 'claude', 1, 2)",
+            [],
+        );
+        assert!(before.is_err(), "this is the bug; it must reproduce");
+
+        migrate(&conn).expect("repair");
+
+        // Whatever was still in the table is carried across.
+        let kept: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions WHERE id = 's1'", [], |r| {
+                r.get(0)
+            })
+            .expect("count");
+        assert_eq!(kept, 1);
+
+        conn.execute(
+            "INSERT INTO sessions (id, project_id, harness, created_at, updated_at)
+                 VALUES ('s3', 'p1', 'claude', 1, 2)",
+            [],
+        )
+        .expect("a new conversation can be created again");
+
+        // And the cascade reaches through the rebuilt table.
+        conn.execute("DELETE FROM projects WHERE id = 'p1'", [])
+            .expect("delete");
+        let left: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(left, 0, "the foreign key names projects again");
+
+        // Search rows for conversations that no longer exist are swept, or
+        // search offers hits that open nothing.
+        let ghosts: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM blocks_fts WHERE session_id = 'ghost'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("count");
+        assert_eq!(ghosts, 0);
     }
 
     #[test]

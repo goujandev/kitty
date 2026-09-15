@@ -19,6 +19,7 @@ import {
   type Block,
   type HarnessId,
   type ModelCatalog,
+  type ModelChoice,
   type Project,
   type RateLimitWindow,
   type SessionRow,
@@ -28,6 +29,8 @@ import {
   describeStop,
 } from "../ipc/bindings";
 import * as ipc from "../ipc/commands";
+import { refresh as refreshProjects } from "./projectStore";
+import { readyHarnesses } from "./harnessStore";
 
 export type { ApprovalKind } from "../ipc/bindings";
 
@@ -60,7 +63,28 @@ export interface ChatState {
   notice: string | null;
   usage: Usage | null;
   context: { used: number | null; window: number | null } | null;
-  limits: RateLimitWindow[];
+  /**
+   * How much of each usage window is gone, per vendor.
+   *
+   * Keyed by harness rather than held for the open conversation, because that
+   * is what a quota actually is: an account-level fact that every session with
+   * the same vendor shares. Holding one list and clearing it on every switch
+   * meant opening an old chat blanked the meters until the next turn refilled
+   * them -- the numbers had not changed, kitty had just thrown them away.
+   *
+   * Still per vendor, though. Showing Claude's numbers in a Codex session
+   * would be worse than showing none.
+   */
+  limits: Partial<Record<HarnessId, RateLimitWindow[]>>;
+  /**
+   * Conversations with a turn in flight, to the project they belong to.
+   *
+   * Tracked for every session rather than just the open one, because the point
+   * is to see from the rails that something is working while you read
+   * something else. The project id rides along so the projects rail can show
+   * activity without knowing which sessions live where.
+   */
+  running: Record<string, string>;
   /**
    * The agent is asking permission. The turn is stalled until this is
    * answered, so it is shown prominently rather than as a notification.
@@ -83,6 +107,13 @@ export interface ChatState {
    * A draft has no session to configure yet, so the choice is held here.
    */
   draftModel: { model: string; effort: string | null } | null;
+  /**
+   * The model a new conversation opens with, from settings.
+   *
+   * Null means none has been chosen and whichever agent is ready runs on its
+   * own recommended model.
+   */
+  defaultChoice: ModelChoice | null;
   error: string | null;
   loading: boolean;
 }
@@ -98,12 +129,14 @@ const EMPTY: ChatState = {
   notice: null,
   usage: null,
   context: null,
-  limits: [],
+  limits: {},
+  running: {},
   approval: null,
   catalogs: {},
   favourites: {},
   runningModel: null,
   draftModel: null,
+  defaultChoice: null,
   error: null,
   loading: false,
 };
@@ -145,15 +178,61 @@ export async function chooseProject(): Promise<void> {
     const path = await ipc.pickFolder();
     if (!path) return;
     await useProject(await ipc.openProject(path));
+    // The rail is a separate store and has no idea this happened. Without
+    // this a folder you just opened is not in the list of folders.
+    await refreshProjects();
   } catch (error) {
     set({ error: message(error) });
   }
 }
 
-/** Opens a folder kitty already knows about. */
-export async function openByRoot(root: string): Promise<void> {
+/**
+ * Forgets a project and everything in it.
+ *
+ * Lives here rather than in the projects store because of the case that made
+ * it worth writing: deleting the project you are currently reading. The rail
+ * would drop the row and leave a transcript on screen belonging to something
+ * that no longer exists, and the next thing you typed would go to a session
+ * whose rows had been cascaded away.
+ *
+ * So you get moved out of it, into a new chat with no folder -- which is the
+ * one place that is always safe to land, because it depends on nothing.
+ */
+export async function forgetProject(projectId: string): Promise<void> {
+  const wasOpen = state.project?.id === projectId;
   try {
-    await useProject(await ipc.openProject(root));
+    await ipc.removeProject(projectId);
+    await refreshProjects();
+    if (wasOpen) await newChat();
+  } catch (error) {
+    set({ error: message(error) });
+  }
+}
+
+/** Opens a project kitty already knows about, with or without a folder. */
+export async function openById(projectId: string): Promise<void> {
+  try {
+    await useProject(await ipc.openStoredProject(projectId));
+    // Opening one moves it to the top, and the rail sorts by that.
+    await refreshProjects();
+  } catch (error) {
+    set({ error: message(error) });
+  }
+}
+
+/**
+ * Starts a conversation with no codebase behind it.
+ *
+ * The project is created now rather than on the first message, because unlike
+ * a draft session it is a row in the rail you are looking at. Walking away
+ * from an empty one is tidied up by `pruneChats` the next time any project is
+ * opened.
+ */
+export async function newChat(): Promise<void> {
+  try {
+    const project = await ipc.newChat();
+    await useProject(project);
+    await refreshProjects();
   } catch (error) {
     set({ error: message(error) });
   }
@@ -179,7 +258,6 @@ export async function openSessionAnywhere(
         error: null,
         draft: null,
         draftModel: null,
-        limits: [],
         usage: null,
         context: null,
         approval: null,
@@ -194,6 +272,10 @@ export async function openSessionAnywhere(
 
 export async function restoreLastProject(): Promise<void> {
   try {
+    // Sweep first, keeping nothing. A chat with no folder and no messages is
+    // one that was asked for and walked away from, and restoring it would put
+    // the user back in front of a box they already decided not to type into.
+    await ipc.pruneChats("").catch(() => 0);
     const projects = await ipc.listProjects();
     if (projects.length > 0 && projects[0]) await useProject(projects[0]);
   } catch (error) {
@@ -209,31 +291,98 @@ async function useProject(project: Project): Promise<void> {
     activeId: null,
     draft: null,
     blocks: [],
-    limits: [],
     usage: null,
     context: null,
     approval: null,
   });
   // Tidy before listing, so abandoned sessions never appear at all.
   await ipc.pruneSessions(project.id).catch(() => 0);
+  // And the same for chats: one exists from the moment you ask for it, so
+  // clicking away from an empty one has to leave nothing behind.
+  await ipc.pruneChats(project.id).catch(() => 0);
   const sessions = await ipc.listSessions(project.id);
   set({ sessions });
   const first = sessions[0];
-  if (first) await openSession(first.id);
+  if (first) {
+    await openSession(first.id);
+    return;
+  }
+  // A project with no folder holds exactly one conversation and has no rail
+  // beside it to start one from, so the draft is opened here and the box is
+  // ready to type into.
+  // Nothing to open, so open the next one. A project with no conversations
+  // and a box you cannot type into is a dead end you have to click out of.
+  newSession();
+}
+
+/** Reads the saved default, for deciding what a new conversation opens with. */
+export async function loadDefaultChoice(): Promise<void> {
+  try {
+    set({ defaultChoice: await ipc.defaultModel() });
+  } catch {
+    // A missing preference is not an error; it means the recommended model.
+  }
+}
+
+export async function setDefaultChoice(choice: ModelChoice | null): Promise<void> {
+  try {
+    await ipc.setDefaultModel(choice);
+    set({ defaultChoice: choice });
+  } catch (error) {
+    set({ error: message(error) });
+  }
 }
 
 /**
- * Chooses an agent for a conversation that does not exist yet.
+ * What a new conversation opens with.
  *
- * Nothing is written until the first message, so clicking through the agents
- * leaves no empty sessions behind.
+ * The saved default if its agent can still run -- an agent that has been
+ * uninstalled or signed out of is not a choice any more -- and otherwise the
+ * first one that can, on whatever it recommends itself. Never nothing: an
+ * empty chip is a box you cannot type into, which is the whole problem this
+ * exists to solve.
  */
-export function newSession(harness: HarnessId): void {
+function opening(): { harness: HarnessId; model: string | null; effort: string | null } | null {
+  const ready = readyHarnesses();
+  if (ready.length === 0) return null;
+
+  const saved = state.defaultChoice;
+  if (saved && ready.includes(saved.harness)) {
+    return { harness: saved.harness, model: saved.model, effort: saved.effort };
+  }
+
+  const harness = ready[0];
+  if (!harness) return null;
+  // Whatever that CLI recommends, once its catalog has arrived. Until then the
+  // session starts on the CLI's own default, which is the same thing.
+  const suggested = state.catalogs[harness]?.models.find((m) => m.isDefault);
+  return {
+    harness,
+    model: suggested?.id ?? null,
+    effort: suggested?.defaultEffort ?? null,
+  };
+}
+
+/**
+ * Opens a conversation that does not exist yet.
+ *
+ * Nothing is written until the first message, so opening one and changing your
+ * mind leaves no empty sessions behind. It arrives with a model already
+ * chosen, so the box is typeable the moment it appears -- picking a model is
+ * something you do because you want a different one, not a toll gate in front
+ * of typing.
+ */
+export function newSession(): void {
   if (!state.project) return;
-  void loadModels(harness);
+  const start = opening();
+
+  if (start) void loadModels(start.harness);
   set({
-    draft: harness,
-    draftModel: null,
+    draft: start?.harness ?? null,
+    draftModel:
+      start?.model != null
+        ? { model: start.model, effort: start.effort }
+        : null,
     activeId: null,
     blocks: [],
     busy: false,
@@ -241,10 +390,34 @@ export function newSession(harness: HarnessId): void {
     notice: null,
     usage: null,
     context: null,
-    limits: [],
     approval: null,
     error: null,
   });
+}
+
+/**
+ * Forgets one conversation.
+ *
+ * If it was the one on screen, the next one in the project takes its place --
+ * or the project is left empty rather than showing a transcript that is no
+ * longer anywhere.
+ */
+export async function removeSession(sessionId: string): Promise<void> {
+  try {
+    await ipc.deleteSession(sessionId);
+    const left = state.sessions.filter((s) => s.id !== sessionId);
+    set({ sessions: left });
+
+    if (state.activeId !== sessionId) return;
+    const next = left[0];
+    if (next) {
+      await openSession(next.id);
+      return;
+    }
+    set({ activeId: null, blocks: [], busy: false, approval: null });
+  } catch (error) {
+    set({ error: message(error) });
+  }
 }
 
 /** Switches to a session, reloading its transcript from the database. */
@@ -259,9 +432,6 @@ export async function openSession(sessionId: string): Promise<void> {
     notice: null,
     usage: null,
     context: null,
-    // Usage windows belong to whichever agent is speaking. Carrying Claude's
-    // numbers into a Codex session is worse than showing none.
-    limits: [],
     approval: null,
     runningModel: null,
     error: null,
@@ -301,6 +471,12 @@ export async function send(text: string): Promise<void> {
       return;
     }
 
+    // Marked before the round trip, not after. A turn that finished first
+    // would otherwise clear a flag that had not been set yet, and then the
+    // flag would be set, and the row would spin for ever.
+    if (state.project) {
+      set({ running: { ...state.running, [sessionId]: state.project.id } });
+    }
     const seq = await ipc.sendTurn(sessionId, trimmed);
     // Show it immediately rather than waiting for a round trip.
     appendLocalBlock({
@@ -310,11 +486,24 @@ export async function send(text: string): Promise<void> {
       meta: null,
       createdAt: Date.now(),
     });
-    // The title is derived from the first message, so refresh the list.
+    // The title is derived from the first message, so refresh the list. A
+    // folderless project is named after that same title, so the rail on the
+    // far left has just gone stale too.
     void refreshSessions();
+    if (state.project?.root === null) void refreshProjects();
   } catch (error) {
+    // The turn never started, so nothing is working on our behalf.
+    if (state.activeId) markIdle(state.activeId);
     set({ busy: false, error: message(error) });
   }
+}
+
+/** Marks a conversation as no longer working. */
+function markIdle(sessionId: string): void {
+  if (!(sessionId in state.running)) return;
+  const running = { ...state.running };
+  delete running[sessionId];
+  set({ running });
 }
 
 /** Turns the chosen agent into a real session. Returns its id. */
@@ -350,6 +539,16 @@ export async function cancel(): Promise<void> {
   if (!activeId) return;
   try {
     await ipc.cancelTurn(activeId);
+  } catch (error) {
+    set({ error: message(error) });
+  }
+}
+
+/** Saves a hand-dragged order for the open project's conversations. */
+export async function reorderSessions(ids: string[]): Promise<void> {
+  try {
+    await ipc.reorderSessions(ids);
+    await refreshSessions();
   } catch (error) {
     set({ error: message(error) });
   }
@@ -454,15 +653,27 @@ export async function toggleFavourite(
  * draft it is remembered and applied when the session is created.
  */
 export async function chooseModel(
+  harness: HarnessId,
   model: string,
   effort: string | null,
 ): Promise<void> {
   if (state.draft) {
-    set({ draftModel: { model, effort } });
+    // The vendor comes with the model. Nothing has been created yet, so
+    // switching between them here costs nothing and asks nothing.
+    set({ draft: harness, draftModel: { model, effort } });
     return;
   }
   const { activeId } = state;
   if (!activeId) return;
+
+  // The CLI is running with this conversation's history and the other vendor
+  // was never told any of it. The picker greys these out; this is the guard
+  // behind that, not a message anyone should see.
+  const running = state.sessions.find((s) => s.id === activeId)?.harness;
+  if (running && running !== harness) {
+    set({ error: "Start a new chat to use a different agent." });
+    return;
+  }
 
   set({ busy: false, notice: null, error: null });
   try {
@@ -535,6 +746,15 @@ function apply(event: TranscriptEvent): void {
       }));
       return;
 
+    case "picturesAttached":
+      // Stored on the block rather than held beside it, so reopening the
+      // conversation shows them without going back to the folder.
+      replaceBlock(event.seq, (block) => ({
+        ...block,
+        meta: JSON.stringify({ images: event.paths }),
+      }));
+      return;
+
     case "approvalRequested":
       set({
         approval: {
@@ -578,9 +798,14 @@ function apply(event: TranscriptEvent): void {
       set({ context: { used: event.used, window: event.window } });
       return;
 
-    case "rateLimits":
-      set({ limits: event.windows });
+    case "rateLimits": {
+      // Filed under whoever reported them, so switching between two Claude
+      // conversations keeps the numbers and switching vendor does not mix
+      // them up.
+      const speaking = currentHarness();
+      if (speaking) set({ limits: { ...state.limits, [speaking]: event.windows } });
       return;
+    }
 
     case "status":
       set({ status: event.text });
@@ -598,8 +823,38 @@ function apply(event: TranscriptEvent): void {
 /** Starts listening for transcript batches. Call once, at startup. */
 export async function listen(): Promise<() => void> {
   return ipc.onTranscript((batch: TranscriptBatch) => {
-    // Batches for other sessions are the host's business, not ours.
+    // Whether a turn has finished is read from every batch, not just the open
+    // conversation's: the rails show which conversations are working, and one
+    // you are not looking at is exactly the case that needs saying.
+    for (const event of batch.events) {
+      if (event.kind === "turnEnded" || event.kind === "failed") {
+        markIdle(batch.sessionId);
+      }
+    }
+    // The transcript itself is only rebuilt for the one on screen.
     if (batch.sessionId !== state.activeId) return;
     for (const event of batch.events) apply(event);
+  });
+}
+
+// ---------------------------------------------------------------- hot reload
+
+/**
+ * This module is not hot-swappable, so an edit reloads the window.
+ *
+ * It holds live state and, more importantly, the transcript subscription
+ * registered once at startup. Vite replaces the module on every edit, and
+ * React Fast Refresh makes the components importing it self-accepting, so the
+ * update is absorbed without a page reload: the components start reading a
+ * fresh, empty copy while the subscription keeps writing into the old one.
+ *
+ * Nothing re-renders. A reply streams into a store nobody is looking at, the
+ * blocks still reach the database, and clicking the conversation appears to
+ * fix it because that path reloads from there. Which is a very convincing
+ * impression of a broken transcript, and cost a lot of time to recognise.
+ */
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    import.meta.hot?.invalidate();
   });
 }

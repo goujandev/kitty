@@ -72,9 +72,11 @@ export async function refresh(): Promise<void> {
   }
 }
 
-export async function remove(projectId: string): Promise<void> {
+
+/** Saves a hand-dragged order. The list is already showing it. */
+export async function reorder(ids: string[]): Promise<void> {
   try {
-    await ipc.removeProject(projectId);
+    await ipc.reorderProjects(ids);
     await refresh();
   } catch (error) {
     set({ error: message(error) });
@@ -144,4 +146,26 @@ async function decorate(hits: Hit[]): Promise<SearchResult[]> {
 export function clearSearch(): void {
   token += 1;
   set({ query: "", results: [], searching: false });
+}
+
+// ---------------------------------------------------------------- hot reload
+
+/**
+ * This module is not hot-swappable, so an edit reloads the window.
+ *
+ * It holds live state and, more importantly, the transcript subscription
+ * registered once at startup. Vite replaces the module on every edit, and
+ * React Fast Refresh makes the components importing it self-accepting, so the
+ * update is absorbed without a page reload: the components start reading a
+ * fresh, empty copy while the subscription keeps writing into the old one.
+ *
+ * Nothing re-renders. A reply streams into a store nobody is looking at, the
+ * blocks still reach the database, and clicking the conversation appears to
+ * fix it because that path reloads from there. Which is a very convincing
+ * impression of a broken transcript, and cost a lot of time to recognise.
+ */
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    import.meta.hot?.invalidate();
+  });
 }

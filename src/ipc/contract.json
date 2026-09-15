@@ -222,6 +222,13 @@
       "text": "Hello, lovely human."
     },
     {
+      "kind": "picturesAttached",
+      "paths": [
+        "C:\\Users\\you\\.codex\\generated_images\\t\\cat.png"
+      ],
+      "seq": 1
+    },
+    {
       "detail": "1 file",
       "kind": "toolStatusChanged",
       "seq": 2,

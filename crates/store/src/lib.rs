@@ -54,7 +54,10 @@ pub type Result<T> = std::result::Result<T, StoreError>;
 #[serde(rename_all = "camelCase")]
 pub struct Project {
     pub id: String,
-    pub root: String,
+    /// The folder the agent runs in, or None for a project that is only a
+    /// conversation. A project without a root has no codebase behind it and
+    /// holds exactly one session.
+    pub root: Option<String>,
     pub name: String,
     pub created_at: i64,
     pub last_opened_at: i64,
@@ -191,8 +194,8 @@ impl Store {
 
         self.write(|conn| {
             conn.execute(
-                "INSERT INTO projects (id, root, name, created_at, last_opened_at)
-                 VALUES (?1, ?2, ?3, ?4, ?4)
+                "INSERT INTO projects (id, root, name, created_at, last_opened_at, sort_order)
+                 VALUES (?1, ?2, ?3, ?4, ?4, ?4)
                  ON CONFLICT(root) DO UPDATE SET last_opened_at = ?4",
                 params![new_id(), root_text, name, now],
             )?;
@@ -205,11 +208,91 @@ impl Store {
         })
     }
 
+    /// Writes an explicit order for a list of projects, top first.
+    ///
+    /// The whole list is sent rather than one moved row, because that is what
+    /// the caller already has and it makes the result independent of whatever
+    /// the numbers happened to be before. Renumbered from the length down, so
+    /// a project created afterwards -- which takes the clock as its order --
+    /// still lands above them.
+    pub fn reorder_projects(&self, ids: &[String]) -> Result<()> {
+        self.write(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            {
+                let mut stmt = tx.prepare("UPDATE projects SET sort_order = ?2 WHERE id = ?1")?;
+                for (index, id) in ids.iter().enumerate() {
+                    let order = i64::try_from(ids.len() - index).unwrap_or(0);
+                    stmt.execute(params![id, order])?;
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    /// The same, for the conversations inside one project.
+    pub fn reorder_sessions(&self, ids: &[String]) -> Result<()> {
+        self.write(|conn| {
+            let tx = conn.unchecked_transaction()?;
+            {
+                let mut stmt = tx.prepare("UPDATE sessions SET sort_order = ?2 WHERE id = ?1")?;
+                for (index, id) in ids.iter().enumerate() {
+                    let order = i64::try_from(ids.len() - index).unwrap_or(0);
+                    stmt.execute(params![id, order])?;
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })
+    }
+
+    /// Creates a project with no folder behind it.
+    ///
+    /// Not an upsert, unlike `open_project`: there is no path to recognise it
+    /// by, so every call is a new one. That is the point -- each is a single
+    /// conversation, and asking a second question means a second project.
+    pub fn create_rootless_project(&self, name: &str) -> Result<Project> {
+        let id = new_id();
+        let now = now_ms();
+        let name = name.trim();
+        let name = if name.is_empty() { "New chat" } else { name };
+        self.write(|conn| {
+            conn.execute(
+                "INSERT INTO projects (id, root, name, created_at, last_opened_at, sort_order)
+                 VALUES (?1, NULL, ?2, ?3, ?3, ?3)",
+                params![id, name, now],
+            )?;
+            let project = conn.query_row(
+                "SELECT id, root, name, created_at, last_opened_at FROM projects WHERE id = ?1",
+                params![id],
+                project_from_row,
+            )?;
+            Ok(project)
+        })
+    }
+
+    /// Marks a project opened and returns it, whether or not it has a folder.
+    pub fn touch_project(&self, project_id: &str) -> Result<Project> {
+        let now = now_ms();
+        self.write(|conn| {
+            conn.execute(
+                "UPDATE projects SET last_opened_at = ?2 WHERE id = ?1",
+                params![project_id, now],
+            )?;
+            let project = conn.query_row(
+                "SELECT id, root, name, created_at, last_opened_at FROM projects WHERE id = ?1",
+                params![project_id],
+                project_from_row,
+            )?;
+            Ok(project)
+        })
+    }
+
     pub fn list_projects(&self) -> Result<Vec<Project>> {
         self.read(|conn| {
             let mut stmt = conn.prepare(
                 "SELECT id, root, name, created_at, last_opened_at
-                 FROM projects ORDER BY last_opened_at DESC",
+                 FROM projects ORDER BY sort_order DESC, created_at DESC",
             )?;
             let rows = stmt
                 .query_map([], project_from_row)?
@@ -257,8 +340,9 @@ impl Store {
         let now = now_ms();
         self.write(|conn| {
             conn.execute(
-                "INSERT INTO sessions (id, project_id, harness, model, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+                "INSERT INTO sessions
+                     (id, project_id, harness, model, created_at, updated_at, sort_order)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?5)",
                 params![id, project_id, harness, model, now],
             )?;
             Ok(())
@@ -287,7 +371,8 @@ impl Store {
             let mut stmt = conn.prepare(
                 "SELECT id, project_id, harness, model, effort, provider_session, title,
                         created_at, updated_at
-                 FROM sessions WHERE project_id = ?1 ORDER BY updated_at DESC",
+                 FROM sessions WHERE project_id = ?1
+                  ORDER BY sort_order DESC, created_at DESC",
             )?;
             let rows = stmt
                 .query_map(params![project_id], session_from_row)?
@@ -352,6 +437,15 @@ impl Store {
                 "UPDATE sessions SET title = ?2, updated_at = ?3
                  WHERE id = ?1 AND (title IS NULL OR title = '')",
                 params![session_id, trimmed, now_ms()],
+            )?;
+            // A folder project is named after its folder. One without a folder
+            // has nothing else to be called, and it holds exactly this
+            // conversation, so it takes the same name.
+            conn.execute(
+                "UPDATE projects SET name = ?2
+                 WHERE root IS NULL
+                   AND id = (SELECT project_id FROM sessions WHERE id = ?1)",
+                params![session_id, trimmed],
             )?;
             Ok(())
         })
@@ -454,6 +548,28 @@ impl Store {
                  WHERE project_id = ?1
                    AND id NOT IN (SELECT DISTINCT session_id FROM blocks)",
                 params![project_id],
+            )?;
+            Ok(removed)
+        })
+    }
+
+    /// Drops conversations that were started and never used.
+    ///
+    /// A chat with no folder is created the moment you ask for one, because it
+    /// has to exist to be the row you are looking at. Clicking away from an
+    /// empty one should leave nothing behind, which is what this is for --
+    /// `keep` is whichever one is on screen right now.
+    ///
+    /// Folder projects are never touched: those were an explicit act with a
+    /// path attached, and an empty one is still a bookmark worth having.
+    pub fn prune_empty_chats(&self, keep: &str) -> Result<usize> {
+        self.write(|conn| {
+            let removed = conn.execute(
+                "DELETE FROM projects
+                 WHERE root IS NULL
+                   AND id <> ?1
+                   AND id NOT IN (SELECT DISTINCT project_id FROM sessions)",
+                params![keep],
             )?;
             Ok(removed)
         })

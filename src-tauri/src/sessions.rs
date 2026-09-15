@@ -14,10 +14,11 @@
 //!   at most the last fraction of a second of one block, and a long turn does
 //!   not write to disk on every token.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use kitty_core::{BlockKind, SessionEvent, StopReason, ToolStatus, TranscriptEvent, Usage};
 use kitty_engine::Session;
@@ -54,7 +55,17 @@ impl Sink for AppHandle {
         // Targeted at nothing in particular yet because there is one window.
         // When there are several, this becomes `emit_to` so a webview does not
         // deserialize another window's traffic (ARCHITECTURE.md §7).
-        let _ = self.emit(TRANSCRIPT_EVENT, &Batch { session_id, events });
+        //
+        // Failures are said out loud. Discarding this result is how a
+        // transcript stops updating with no sign of why anywhere: the blocks
+        // still reach the database, so reopening the conversation shows the
+        // reply that never arrived, and nothing in the app ever mentions it.
+        if let Err(error) = self.emit(TRANSCRIPT_EVENT, &Batch { session_id, events }) {
+            eprintln!(
+                "kitty: {} transcript events for {session_id} were not delivered: {error}",
+                events.len()
+            );
+        }
     }
 }
 
@@ -79,6 +90,9 @@ pub fn pump(app: AppHandle, store: Arc<Store>, session_id: String, events: Recei
             pending: Vec::new(),
             usage: Usage::default(),
             last_emit: Instant::now(),
+            last_assistant: None,
+            pictures: HashSet::new(),
+            started: SystemTime::now(),
         }
         .run(&events);
     });
@@ -110,6 +124,14 @@ struct Transcript<S: Sink> {
     pending: Vec<TranscriptEvent>,
     usage: Usage,
     last_emit: Instant,
+    /// The reply being written, so pictures made during a turn land under it.
+    last_assistant: Option<i64>,
+    /// Pictures already attached, so a second turn does not repeat the first
+    /// turn's work.
+    pictures: HashSet<String>,
+    /// When this pump started. Anything older than it belongs to an earlier
+    /// run of the same conversation and is already in the transcript.
+    started: SystemTime,
 }
 
 impl<S: Sink> Transcript<S> {
@@ -212,6 +234,7 @@ impl<S: Sink> Transcript<S> {
             SessionEvent::TurnEnded { stop } => {
                 self.close_all();
                 self.abandon_tools();
+                self.attach_pictures();
                 let _ = self
                     .store
                     .record_turn(&self.session_id, stop_label(&stop), self.usage);
@@ -319,6 +342,9 @@ impl<S: Sink> Transcript<S> {
         let Ok(seq) = self.store.append_block(&self.session_id, kind, text) else {
             return;
         };
+        if kind == BlockKind::Assistant {
+            self.last_assistant = Some(seq);
+        }
         self.open.insert(
             kind,
             OpenBlock {
@@ -388,6 +414,39 @@ impl<S: Sink> Transcript<S> {
         }
     }
 
+    /// Hangs any pictures made this turn under the reply that discussed them.
+    ///
+    /// Codex generates images with its own tool and writes them to
+    /// `~/.codex/generated_images/<thread>/`, then talks about the result
+    /// without ever saying where it went -- "Here's your cat" and nothing
+    /// else. There is no path in the transcript to find, so this does not look
+    /// for one: the folder is named after the thread id, which is the same id
+    /// kitty already keeps to resume the conversation.
+    fn attach_pictures(&mut self) {
+        let Some(seq) = self.last_assistant else {
+            return;
+        };
+        let Ok(row) = self.store.session(&self.session_id) else {
+            return;
+        };
+        let Some(thread) = row.provider_session else {
+            return;
+        };
+
+        let paths = pictures_since(&thread, self.started, &mut self.pictures);
+        if paths.is_empty() {
+            return;
+        }
+
+        // Persisted as well as announced, or they would vanish on reopening a
+        // conversation while the files sat there on disk.
+        let _ = self
+            .store
+            .set_block_meta(&self.session_id, seq, &pictures_meta(&paths));
+        self.pending
+            .push(TranscriptEvent::PicturesAttached { seq, paths });
+    }
+
     /// Marks any tool row still running as failed.
     ///
     /// Called when the session ends. A row left spinning forever is worse
@@ -415,6 +474,59 @@ impl<S: Sink> Transcript<S> {
         self.sink.deliver(&self.session_id, &self.pending);
         self.pending.clear();
     }
+}
+
+/// Pictures in a thread's folder that this run has not already shown.
+///
+/// Filtered by time as well as by name: reopening a conversation starts a new
+/// pump with an empty set, and without the clock every picture from every
+/// previous turn would be attached again to whatever was said next.
+fn pictures_since(thread: &str, after: SystemTime, seen: &mut HashSet<String>) -> Vec<String> {
+    let Some(home) = std::env::var_os("USERPROFILE") else {
+        return Vec::new();
+    };
+    let dir = PathBuf::from(home)
+        .join(".codex")
+        .join("generated_images")
+        .join(thread);
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+
+    let mut found: Vec<(SystemTime, String)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !is_picture(&path) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        let Ok(when) = meta.modified() else { continue };
+        if when < after {
+            continue;
+        }
+        let text = path.to_string_lossy().into_owned();
+        if !seen.insert(text.clone()) {
+            continue;
+        }
+        found.push((when, text));
+    }
+
+    // Oldest first, so several from one turn read in the order they were made.
+    found.sort_by_key(|(when, _)| *when);
+    found.into_iter().map(|(_, path)| path).collect()
+}
+
+fn is_picture(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+        matches!(
+            e.to_ascii_lowercase().as_str(),
+            "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp"
+        )
+    })
+}
+
+fn pictures_meta(paths: &[String]) -> String {
+    serde_json::json!({ "images": paths }).to_string()
 }
 
 /// A tool row's structured detail, stored alongside its title.
@@ -492,6 +604,9 @@ mod tests {
             pending: Vec::new(),
             usage: Usage::default(),
             last_emit: Instant::now(),
+            last_assistant: None,
+            pictures: std::collections::HashSet::new(),
+            started: std::time::SystemTime::now(),
         }
         .run(&rx);
 

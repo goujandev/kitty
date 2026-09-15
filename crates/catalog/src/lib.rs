@@ -166,13 +166,47 @@ fn probe_claude(binary: &Path, cwd: &Path) -> Result<Vec<ModelInfo>, CatalogErro
             .and_then(|r| r.get("models"))
             .and_then(Value::as_array)
         {
-            found = models.iter().filter_map(claude_model).collect();
+            found = claude_models(models);
         }
         Reply::Done
     })?;
 
     Ok(found)
 }
+
+/// The list, with the `default` row folded into the model it points at.
+///
+/// Claude Code offers a row called "Default (recommended)" whose
+/// `resolvedModel` is one of the others -- today `claude-opus-5[1m]`, which is
+/// also what `opus[1m]` resolves to. Kept as its own entry it is a second name
+/// for a model already in the list, and picking between two rows that do the
+/// same thing is not a choice, it is a puzzle.
+///
+/// So the row goes, and the thing it was recommending is marked instead. The
+/// recommendation itself is not lost, just attached to a real model.
+fn claude_models(raw: &[Value]) -> Vec<ModelInfo> {
+    let recommended = raw
+        .iter()
+        .find(|entry| entry.get("value").and_then(Value::as_str) == Some(DEFAULT_ID))
+        .and_then(|entry| entry.get("resolvedModel").and_then(Value::as_str));
+
+    raw.iter()
+        .filter(|entry| entry.get("value").and_then(Value::as_str) != Some(DEFAULT_ID))
+        .filter_map(|entry| {
+            let mut model = claude_model(entry)?;
+            // Matched on what it resolves to rather than on the id, because
+            // the recommendation names the underlying model and the ids that
+            // reach it are aliases.
+            model.is_default = recommended.is_some_and(|target| {
+                entry.get("resolvedModel").and_then(Value::as_str) == Some(target)
+            });
+            Some(model)
+        })
+        .collect()
+}
+
+/// The alias Claude Code uses for "whichever one we currently recommend".
+const DEFAULT_ID: &str = "default";
 
 fn claude_model(raw: &Value) -> Option<ModelInfo> {
     // `value` is what the CLI accepts back; `resolvedModel` is only for show.
@@ -190,11 +224,10 @@ fn claude_model(raw: &Value) -> Option<ModelInfo> {
 
     Some(ModelInfo {
         id: id.to_owned(),
-        display_name: raw
-            .get("displayName")
-            .and_then(Value::as_str)
-            .unwrap_or(id)
-            .to_owned(),
+        display_name: claude_label(
+            raw,
+            raw.get("displayName").and_then(Value::as_str).unwrap_or(id),
+        ),
         description: raw
             .get("description")
             .and_then(Value::as_str)
@@ -203,9 +236,40 @@ fn claude_model(raw: &Value) -> Option<ModelInfo> {
         // the honest choice rather than inventing one.
         default_effort: efforts.iter().find(|e| *e == "high").cloned(),
         efforts,
-        is_default: id == "default",
+        // Decided by `claude_models`, which is the only caller and the only
+        // place that can see the whole list at once.
+        is_default: false,
     })
 }
+
+/// The model's real name, which Claude Code puts in the description.
+///
+/// `displayName` is the family alone -- "Fable", "Sonnet", "Haiku" -- so the
+/// picker showed two generations of a model under one name and no way to tell
+/// which you were about to run. The description opens with the full name and
+/// then a separator and a sales line: "Fable 5.1 - Most capable for your
+/// hardest and longest-running tasks". The first half is the answer.
+///
+/// Read from the CLI rather than from a table in this repo, for the same
+/// reason the catalog itself is (`MODEL-CATALOG.md`): a model released this
+/// morning has to name itself correctly without kitty shipping anything.
+///
+/// An earlier version of this read the version off the id instead, which was
+/// wrong in a way worth recording. `claude-fable-5-1[1m]` resolves to plain
+/// `claude-fable-5-1` -- the bracket in the id is not a promise about context
+/// -- so parsing it produced a label claiming a 1M window the model does not
+/// have. The CLI knows; kitty should not be guessing.
+fn claude_label(raw: &Value, display_name: &str) -> String {
+    raw.get("description")
+        .and_then(Value::as_str)
+        .and_then(|text| text.split(SEPARATOR).next())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map_or_else(|| display_name.to_owned(), str::to_owned)
+}
+
+/// The middle dot Claude Code puts between a model's name and its blurb.
+const SEPARATOR: char = '\u{b7}';
 
 /// Codex answers a paginated `model/list` after the usual handshake.
 fn probe_codex(binary: &Path, cwd: &Path) -> Result<Vec<ModelInfo>, CatalogError> {
@@ -334,7 +398,75 @@ fn now_ms() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{claude_model, codex_model};
+
+    /// The five entries Claude Code 2.1.270 actually returns, verbatim.
+    ///
+    /// Captured from the installed CLI rather than invented, because the whole
+    /// point is to use its own words. If a future CLI stops putting the name
+    /// in the description this fails, which is the correct outcome.
+    #[test]
+    fn a_claude_label_is_the_name_the_cli_puts_in_the_description() {
+        let cases = [
+            (
+                json!({
+                    "value": "opus[1m]",
+                    "displayName": "Opus (1M context)",
+                    "description": "Opus 5 with 1M context \u{b7} Best for everyday, complex tasks",
+                }),
+                "Opus 5 with 1M context",
+            ),
+            (
+                json!({
+                    "value": "claude-fable-5-1[1m]",
+                    "displayName": "Fable",
+                    "description": "Fable 5.1 \u{b7} Most capable for your hardest and longest-running tasks",
+                }),
+                // The bracket in this id is not a 1M window -- it resolves to
+                // plain `claude-fable-5-1`. A label read off the id claimed
+                // otherwise, which is why nothing is read off the id.
+                "Fable 5.1",
+            ),
+            (
+                json!({
+                    "value": "sonnet",
+                    "displayName": "Sonnet",
+                    "description": "Sonnet 5 \u{b7} Efficient for routine tasks",
+                }),
+                "Sonnet 5",
+            ),
+            (
+                json!({
+                    "value": "haiku",
+                    "displayName": "Haiku",
+                    "description": "Haiku 4.5 \u{b7} Fastest for quick answers",
+                }),
+                "Haiku 4.5",
+            ),
+        ];
+
+        for (raw, expected) in cases {
+            let given = raw
+                .get("displayName")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            assert_eq!(super::claude_label(&raw, given), expected);
+        }
+    }
+
+    /// A model kitty has never heard of still has to arrive intact.
+    #[test]
+    fn a_claude_label_falls_back_when_the_description_has_no_name() {
+        let bare = json!({ "value": "some-new-thing" });
+        assert_eq!(
+            super::claude_label(&bare, "Some New Thing"),
+            "Some New Thing"
+        );
+
+        let empty = json!({ "value": "y", "description": "   " });
+        assert_eq!(super::claude_label(&empty, "Y"), "Y");
+    }
+
+    use super::{claude_model, claude_models, codex_model};
     use serde_json::json;
 
     #[test]
@@ -355,10 +487,61 @@ mod tests {
     }
 
     #[test]
-    fn the_claude_default_entry_is_marked() {
-        let m =
-            claude_model(&json!({"value": "default", "displayName": "Default"})).expect("model");
-        assert!(m.is_default);
+    fn the_default_row_is_dropped_and_what_it_pointed_at_is_marked() {
+        // The shape Claude Code 2.1.270 returns: a "default" alias whose
+        // resolvedModel is the same one `opus[1m]` reaches.
+        let raw = vec![
+            json!({
+                "value": "default",
+                "resolvedModel": "claude-opus-5[1m]",
+                "displayName": "Default (recommended)",
+                "description": "Opus 5 with 1M context \u{b7} Best for everyday, complex tasks",
+            }),
+            json!({
+                "value": "opus[1m]",
+                "resolvedModel": "claude-opus-5[1m]",
+                "displayName": "Opus (1M context)",
+                "description": "Opus 5 with 1M context \u{b7} Best for everyday, complex tasks",
+            }),
+            json!({
+                "value": "sonnet",
+                "resolvedModel": "claude-sonnet-5",
+                "displayName": "Sonnet",
+                "description": "Sonnet 5 \u{b7} Efficient for routine tasks",
+            }),
+        ];
+
+        let models = claude_models(&raw);
+
+        let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["opus[1m]", "sonnet"],
+            "the alias is not a model anyone should have to choose between"
+        );
+
+        let marked: Vec<&str> = models
+            .iter()
+            .filter(|m| m.is_default)
+            .map(|m| m.id.as_str())
+            .collect();
+        assert_eq!(
+            marked,
+            vec!["opus[1m]"],
+            "the recommendation moves to the model it was pointing at"
+        );
+    }
+
+    /// Nothing claims to be recommended if the CLI stops recommending.
+    #[test]
+    fn without_a_default_row_no_model_claims_to_be_one() {
+        let raw = vec![json!({
+            "value": "sonnet",
+            "resolvedModel": "claude-sonnet-5",
+            "displayName": "Sonnet",
+            "description": "Sonnet 5 \u{b7} Efficient for routine tasks",
+        })];
+        assert!(claude_models(&raw).iter().all(|m| !m.is_default));
     }
 
     #[test]

@@ -14,12 +14,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export function Composer({
   busy,
   disabled,
+  placeholder,
   tools,
   onSend,
   onCancel,
 }: {
   busy: boolean;
   disabled: boolean;
+  /** What the empty box says when it cannot be typed into. */
+  placeholder?: string;
   /** Controls shown along the bottom of the box. */
   tools?: React.ReactNode;
   onSend: (text: string) => void;
@@ -64,7 +67,9 @@ export function Composer({
           value={text}
           disabled={disabled}
           placeholder={
-            disabled ? "Open a project first" : "Ask anything, Enter to send"
+            disabled
+              ? placeholder ?? "Not ready yet"
+              : "Ask anything, Enter to send"
           }
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
@@ -82,6 +87,7 @@ export function Composer({
 
         <div className="composer__tools">
           {tools}
+          <span className="composer__gap" />
           {busy ? (
             <button
               type="button"

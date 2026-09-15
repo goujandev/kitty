@@ -7,13 +7,39 @@
   --panel: #1e1e1e;
   --panel-2: #232323;
   --panel-edge: #292929;
-  --text: #ededed;
+  --text: #f5f5f5;
   --muted: #8a8a8a;
-  --accent: #2dd4bf;
+  --accent: #2b948b;
   --ready: #4ade80;
   --blocked: #e3b341;
   --danger: #f87171;
-  --radius: 10px;
+  /* The background as a triplet, for the fades that need it at part opacity.
+     CSS cannot take a hex apart, so the parts are kept alongside the whole. */
+  --bg-rgb: 19, 19, 19;
+  /* The frosted panel over a background image. */
+  --glass-rgb: 30, 30, 30;
+  --code-bg: #0f1115;
+  /* Text on an accent-filled control. */
+  --on-accent: #ffffff;
+  /* The composer standing on a background image: solid, and a step up from the
+     panels elsewhere so it reads as an object on the picture rather than a
+     hole cut into it. */
+  --composer-raised: #2b2b2b;
+  /* The pool of shade under the composer over a background image. */
+  --aura-rgb: 0, 0, 0;
+  /* Behind the inset panel, so its rounded edge has something to sit on. */
+  --shell: #0c0c0c;
+  /* A border that has to be noticed, as on a focused field. */
+  --edge-strong: #3a3a3a;
+
+  /* Corner radii, as a scale rather than a value per element. Every rounded
+     thing in the app picks one of these four, so two controls of the same
+     weight cannot disagree about how round they are. */
+  --r-xs: 6px;
+  --r-sm: 9px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-full: 999px;
   /* Reading width of the conversation. The transcript, the picker row and the
      composer all share it, so the whole chat reads as one centred column
      rather than text stretched across a wide window. */
@@ -23,6 +49,34 @@
   font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   font-size: 14px;
   line-height: 1.5;
+}
+
+/* Light is a second set of values for the same names, so every rule below is
+   written once. Which one is in force is decided in the appearance store and
+   written onto the document, rather than by a media query here: two places
+   answering "which theme" is two places that can disagree. */
+[data-theme="light"] {
+  --bg: #f6f6f6;
+  --bar: #fbfbfb;
+  --panel: #ffffff;
+  --panel-2: #eeeeee;
+  --panel-edge: #e2e2e4;
+  --text: #17171a;
+  --muted: #64646c;
+  --accent: #17796d;
+  --ready: #15803d;
+  --blocked: #b45309;
+  --danger: #dc2626;
+  --bg-rgb: 246, 246, 246;
+  --glass-rgb: 255, 255, 255;
+  --code-bg: #f1f1f1;
+  --on-accent: #ffffff;
+  --composer-raised: #ffffff;
+  --aura-rgb: 255, 255, 255;
+  --shell: #e9e9e9;
+  --edge-strong: #bdbdbd;
+
+  color-scheme: light;
 }
 
 * {
@@ -54,12 +108,98 @@ body {
 /* ----------------------------------------------------------------- rails */
 
 .rail {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: none;
-  width: 212px;
+  width: 198px;
   border-right: 1px solid var(--panel-edge);
-  overflow: hidden;
+  background: var(--shell);
+}
+
+/* The rail beside the panel needs no divider: the gap around the panel is
+   already the separation, and a line as well would be saying it twice.
+   Which rail that is depends on whether there is a middle one -- a chat with
+   no folder has nothing to list, so the projects rail ends up against the
+   panel and inherits the rule. */
+.rail--chats,
+.app--solo .rail {
+  border-right: 0;
+}
+
+/* Right-clicking a row. One item, at the pointer. */
+.rowmenu {
+  position: fixed;
+  z-index: 70;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--r-md);
+  background: var(--panel-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.rowmenu__item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.rowmenu__item:hover {
+  background: var(--panel);
+}
+
+.rowmenu__item--danger:hover {
+  color: var(--danger);
+}
+
+/* The draggable edge. Straddles the boundary and is far wider than the line it
+   sits on, because a one-pixel target is one you hunt for. Invisible until the
+   pointer is on it: a divider drawn as a control all the time is a control
+   competing with the lists either side of it. */
+.grip {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  z-index: 5;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  /* Stops the pointer from being interpreted as a scroll gesture mid-drag. */
+  touch-action: none;
+}
+
+.grip::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 3px;
+  width: 1px;
+  height: 100%;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.grip:hover::after,
+.grip--dragging::after {
+  opacity: 1;
+}
+
+/* While a drag is live the cursor is the resize cursor everywhere, or crossing
+   a button mid-drag would flicker it back to a pointer. */
+.is-resizing,
+.is-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .rail__head {
@@ -70,8 +210,6 @@ body {
   flex: none;
   height: 38px;
   padding: 0 12px;
-  border-bottom: 1px solid var(--panel-edge);
-  background: var(--bar);
 }
 
 .rail__title {
@@ -94,15 +232,8 @@ body {
 
 .rail__foot {
   flex: none;
-  border-top: 1px solid var(--panel-edge);
   padding: 8px;
-}
-
-.rail__promise {
-  margin: 0 0 6px;
-  padding: 0 9px;
-  font-size: 10.5px;
-  line-height: 1.45;
+  border-top: 1px solid var(--panel-edge);
 }
 
 .rail__empty {
@@ -112,11 +243,12 @@ body {
 
 /* One row in either rail: a project, or a conversation. */
 .entry {
+  position: relative;
   display: block;
   width: 100%;
   padding: 7px 9px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: none;
   color: var(--text);
   cursor: pointer;
@@ -130,6 +262,12 @@ body {
 
 .entry--active {
   background: var(--panel-2);
+}
+
+.entry--icon {
+  display: flex;
+  align-items: center;
+  gap: 9px;
 }
 
 .entry--missing .entry__name {
@@ -161,7 +299,7 @@ body {
   right: 6px;
   padding: 0 4px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   background: none;
   color: var(--muted);
   cursor: pointer;
@@ -184,7 +322,7 @@ body {
   margin: 0 0 8px;
   padding: 6px 9px;
   border: 1px solid var(--panel-edge);
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: var(--panel);
   color: var(--text);
   font: inherit;
@@ -198,6 +336,16 @@ body {
 
 .rail--chats {
   width: 248px;
+}
+
+/* Sits above the list rather than in it: it is not one of the things you are
+   choosing between, it is how you add another one. */
+.rail__new {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: none;
+  padding: 2px 8px 0;
 }
 
 .rail__tools {
@@ -236,7 +384,192 @@ body {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  background: var(--shell);
 }
+
+/* Everything below the title strip, as one rounded panel inset from the
+   window. The strip stays flush because the close button has to reach the
+   corner; the panel does not, because nothing in it does. */
+.canvas {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  margin: 0 9px 9px;
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--r-lg);
+  background: var(--bg);
+}
+
+/* Above the picture, which is the panel's own first child. */
+.canvas > *:not(.wallpaper) {
+  position: relative;
+}
+
+/* --------------------------------------------------------------- wallpaper */
+
+/* Four layers, bottom to top: the picture, a screen that carries both the dot
+   texture and the tonal shaping, a settle onto the window's own colour, and
+   the sheet that steps the whole thing back behind a transcript.
+
+   The one that matters is the second. It darkens by MULTIPLYING rather than by
+   laying part-opaque grey over the top, and that is the whole difference
+   between this and the version before it. Alpha-blending a photograph towards
+   #131313 drags every pixel towards a neutral, so the greens and the warm
+   light in the window go grey on their way to dark and the picture ends up
+   both dim and lifeless. Multiplying scales the channels instead: the result
+   is just as dark where it needs to be, and what colour survives stays as
+   saturated as it started.
+
+   Only the last stretch is done with alpha, because the very edge has to
+   arrive at the panel colour exactly and multiply can only ever arrive at
+   black -- which against a #131313 panel reads as a darker patch with a seam
+   around it. */
+.wallpaper {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* Confines the multiply above to these layers. Without it the blend reaches
+     through to the panel and the shell behind the rounded corner. */
+  isolation: isolate;
+}
+
+.wallpaper__image,
+.wallpaper__screen,
+.wallpaper__fade,
+.wallpaper__hush {
+  position: absolute;
+  inset: 0;
+}
+
+.wallpaper__image {
+  background-position: center;
+  background-size: cover;
+  /* Not dimmed at all, and pushed. CSS has no true vibrance -- which would
+     leave already-saturated pixels alone -- so this is saturate with a little
+     contrast under it, which is close enough on a photograph and is what the
+     picture needs to hold up once the screen above has taken a third of its
+     light away. */
+  filter: saturate(1.4) contrast(1.04);
+}
+
+/* The dot matrix and the shaping, in one element because they want the same
+   blend mode; three backgrounds on one layer rather than two layers that have
+   to stay in step.
+
+   The dots have a soft falloff. The first version went from solid to nothing
+   across a tenth of a pixel, which on a display that is not at 100% scaling
+   cannot be drawn: every dot landed on the pixel grid differently and the
+   texture crawled and moired instead of sitting still. */
+.wallpaper__screen {
+  mix-blend-mode: multiply;
+  background-image:
+    radial-gradient(
+      circle at center,
+      rgba(0, 0, 0, 0.55) 0.9px,
+      rgba(0, 0, 0, 0) 1.9px
+    ),
+    /* Edges and corners, so nothing competes with the rails on either side. */
+    radial-gradient(
+      138% 108% at 50% 22%,
+      transparent 45%,
+      rgba(0, 0, 0, 0.6) 82%,
+      #000 100%
+    ),
+    /* Untouched through the top, gone by the bottom. The top of the picture is
+       the part worth having, so nothing sits on it. */
+    linear-gradient(
+      to bottom,
+      transparent 40%,
+      rgba(0, 0, 0, 0.55) 66%,
+      #000 92%
+    );
+  background-size:
+    4px 4px,
+    cover,
+    cover;
+}
+
+/* The last step of the way down, onto the panel colour rather than to black. */
+.wallpaper__fade {
+  background:
+    radial-gradient(
+      138% 108% at 50% 22%,
+      transparent 68%,
+      rgba(var(--bg-rgb), 0.85) 100%
+    ),
+    linear-gradient(to bottom, transparent 60%, rgba(var(--bg-rgb), 0.9) 94%);
+}
+
+/* The only layer that moves. Reading is the reason the window is open, so once
+   there is a transcript the picture drops back to a texture in the margins. A
+   sheet of the window's own colour does that without touching anything below
+   it, and its opacity is a single number, so the change is a fade rather than
+   a swap. */
+.wallpaper__hush {
+  background: var(--bg);
+  opacity: 0;
+  transition: opacity 0.45s ease;
+}
+
+.wallpaper--behind .wallpaper__hush {
+  opacity: 0.8;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wallpaper__hush {
+    transition: none;
+  }
+}
+
+/* ------------------------------------------------------------------- dock */
+
+/* The composer and the line above it. Pinned under a transcript, and centred
+   when there is no transcript to be pinned under. */
+.dock {
+  flex: none;
+}
+
+.chat--blank .dock {
+  /* Auto margins on both sides of a flex item centre it in what is left. */
+  margin: auto 0;
+  position: relative;
+}
+
+/* A soft pool of dark under the composer.
+   The picture behind is whatever the user chose, so the box cannot rely on it
+   being quiet. This darkens the area the box sits in without putting a hard
+   edge anywhere, which is what a panel or a drop shadow would do. */
+.chat--blank .dock::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 190%;
+  height: 420%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    closest-side at center,
+    rgba(var(--aura-rgb), 0.82) 0%,
+    rgba(var(--aura-rgb), 0.62) 38%,
+    rgba(var(--aura-rgb), 0.28) 66%,
+    rgba(var(--aura-rgb), 0) 100%
+  );
+  pointer-events: none;
+}
+
+/* Both are positioned, so they paint in document order and the aura stays
+   behind without a z-index. */
+.dock > * {
+  position: relative;
+}
+
+
+
+
 
 .chat__head {
   display: flex;
@@ -245,8 +578,6 @@ body {
   flex: none;
   height: 38px;
   padding: 0 0 0 16px;
-  border-bottom: 1px solid var(--panel-edge);
-  background: var(--bar);
 }
 
 /* Whether the agent is working, in the one place always on screen. */
@@ -376,8 +707,8 @@ body {
 
 .msg--user .msg__text {
   max-width: 78%;
-  padding: 6px 12px;
-  border-radius: 9px;
+  padding: 7px 13px;
+  border-radius: var(--r-lg);
   background: var(--panel-2);
 }
 
@@ -404,7 +735,7 @@ body {
   flex: none;
   padding: 3px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   background: none;
   color: var(--muted);
   cursor: pointer;
@@ -417,7 +748,7 @@ body {
 
 .mark {
   flex: none;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
 }
 
 /* ------------------------------------------------------------- status line */
@@ -438,10 +769,6 @@ body {
   gap: 7px;
 }
 
-.statusline__meta {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-}
 
 /* --------------------------------------------------------------- usage */
 
@@ -480,14 +807,14 @@ body {
   overflow: hidden;
   width: 38px;
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--panel-2);
 }
 
 .usage__fill {
   display: block;
   height: 100%;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--muted);
 }
 
@@ -529,7 +856,9 @@ body {
   width: 100%;
   max-width: calc(var(--column) + 44px);
   margin: 0 auto;
-  padding: 0 24px 6px;
+  /* Inset past the box's own edge, so the chips hang off its shoulder rather
+     than lining up flush with it. */
+  padding: 0 60px 9px;
 }
 
 .composer {
@@ -537,7 +866,7 @@ body {
   width: 100%;
   max-width: calc(var(--column) + 44px);
   margin: 0 auto;
-  padding: 0 22px 18px;
+  padding: 0 44px 18px;
 }
 
 /* One surface holding the text and everything that decides how it is
@@ -545,24 +874,30 @@ body {
 .composer__box {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 11px 11px 9px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 14px;
-  background: var(--panel);
+  gap: 12px;
+  /* No border in either state. A box that draws a ring the moment you click
+     into it spends the whole time you are typing pointing at itself, and the
+     caret has already said everything the ring was going to. */
+  padding: 15px 13px 11px;
+  border: 0;
+  border-radius: var(--r-lg);
+  /* Solid, in every state, over anything. A step up from the panels around it
+     so it reads as an object standing on the picture rather than a hole cut
+     into it -- and never part-opaque, which is what made it look like glass
+     over a background image. */
+  background: var(--composer-raised);
 }
 
-.composer__box:focus-within {
-  border-color: #3a3a3a;
-}
-
-.composer__box--off {
-  opacity: 0.7;
+/* Nothing to type into yet. Said by the text, which is the part you read,
+   rather than by fading the whole box, which made it transparent. */
+.composer__box--off .composer__input::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
 }
 
 .composer__input {
   width: 100%;
-  min-height: 24px;
+  min-height: 46px;
   max-height: 33vh;
   padding: 2px 3px;
   border: 0;
@@ -584,18 +919,21 @@ body {
   gap: 6px;
 }
 
+.composer__gap {
+  flex: 1;
+}
+
 .composer__send {
   display: flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 30px;
-  height: 30px;
-  margin-left: auto;
+  width: 28px;
+  height: 28px;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--r-md);
   background: var(--accent);
-  color: #06201c;
+  color: var(--on-accent);
   cursor: pointer;
 }
 
@@ -611,7 +949,7 @@ body {
 
 .composer__send--stop {
   background: var(--blocked);
-  color: #2a1c00;
+  color: var(--on-accent);
 }
 
 .composer__send--stop svg {
@@ -632,7 +970,7 @@ body {
   max-width: 260px;
   padding: 4px 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: none;
   color: var(--text);
   cursor: pointer;
@@ -656,10 +994,14 @@ body {
 }
 
 .chip__chevron {
+  display: flex;
   flex: none;
   color: var(--muted);
-  font-size: 11px;
-  line-height: 1;
+  opacity: 0.75;
+}
+
+.chip:hover:not(:disabled) .chip__chevron {
+  opacity: 1;
 }
 
 /* The working folder, which is a fact rather than a control, so it is quieter
@@ -684,7 +1026,7 @@ body {
   overflow-y: auto;
   padding: 8px;
   border: 1px solid var(--panel-edge);
-  border-radius: 12px;
+  border-radius: var(--r-lg);
   background: var(--panel-2);
   box-shadow: 0 14px 38px rgba(0, 0, 0, 0.5);
 }
@@ -720,6 +1062,81 @@ body {
   font-size: 12px;
 }
 
+/* One line per project, with its mark. The chat count that used to sit under
+   each name made every row two lines tall to report a number nobody was
+   deciding anything on. */
+.entry--slim {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+}
+
+.entry--slim .entry__name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+}
+
+.entry--slim.entry--active .entry__name {
+  font-weight: 600;
+}
+
+/* Assigned from the project's id, so the rail can be read by shape before it
+   is read by name. The colours are set inline, because they are picked per
+   project rather than per class. */
+.pmark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--r-xs);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* No tile and no tint: a chat has no codebase to stand for, and the glyph is
+   the whole point. */
+.pmark--plain {
+  color: var(--muted);
+}
+
+.entry:hover .pmark--plain,
+.entry--active .pmark--plain {
+  color: var(--text);
+}
+
+/* A square button whose glyph is its own label, so no chevron and no room
+   reserved for one. */
+.chip--icon {
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--muted);
+}
+
+.chip--icon:hover:not(:disabled) {
+  color: var(--text);
+}
+
+/* Hung below its button rather than above it. The chips in the composer sit at
+   the bottom of the window and have nowhere to open but up; a button in a rail
+   header has the opposite problem. */
+.pop__menu--below {
+  top: calc(100% + 6px);
+  bottom: auto;
+}
+
+.pop__rule {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--panel-edge);
+}
+
 /* One model, or one effort level. The tick column is always present so the
    names line up whether or not anything is selected. */
 .pop__row {
@@ -728,7 +1145,7 @@ body {
   gap: 4px;
   width: 100%;
   padding: 0 8px 0 0;
-  border-radius: 8px;
+  border-radius: var(--r-md);
 }
 
 .pop__row:hover {
@@ -758,12 +1175,24 @@ body {
   min-width: 0;
   padding: 7px 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: none;
   color: var(--text);
   cursor: pointer;
   font: inherit;
   text-align: left;
+}
+
+/* The other vendor's models, while a conversation is already running on this
+   one. Shown rather than hidden: a menu that silently changes length depending
+   on what you are in the middle of is a menu you cannot learn. */
+.pop__pick:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.pop__pick:disabled svg {
+  opacity: 0.4;
 }
 
 .pop__row-name {
@@ -778,7 +1207,7 @@ body {
   flex: none;
   padding: 4px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-sm);
   background: none;
   color: var(--panel-edge);
   cursor: pointer;
@@ -808,7 +1237,7 @@ body {
 .pop__tag {
   flex: none;
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: var(--panel-2);
   color: var(--muted);
   font-size: 10px;
@@ -829,7 +1258,7 @@ body {
   min-width: 0;
   padding: 5px 9px;
   border: 1px solid var(--panel-edge);
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: var(--panel);
   color: var(--text);
   font: inherit;
@@ -895,7 +1324,7 @@ body {
 .card {
   background: var(--panel);
   border: 1px solid var(--panel-edge);
-  border-radius: var(--radius);
+  border-radius: var(--r-lg);
   padding: 16px 18px;
   border-left: 3px solid var(--panel-edge);
 }
@@ -930,7 +1359,7 @@ body {
 .pill {
   flex: none;
   padding: 2px 9px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -984,7 +1413,7 @@ body {
 .note {
   margin: 14px 0 0;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   background: rgba(122, 162, 247, 0.08);
   color: var(--muted);
   font-size: 12px;
@@ -1009,8 +1438,8 @@ body {
   width: 100%;
   padding: 7px 10px;
   border: 1px solid var(--panel-edge);
-  border-radius: 7px;
-  background: #0f1115;
+  border-radius: var(--r-sm);
+  background: var(--code-bg);
   color: var(--text);
   cursor: pointer;
   text-align: left;
@@ -1041,7 +1470,7 @@ body {
   flex: none;
   padding: 7px 15px;
   border: 1px solid var(--panel-edge);
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
@@ -1073,7 +1502,7 @@ body {
 .banner {
   margin: 12px 22px 0;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--r-md);
   font-size: 13px;
   flex: none;
 }
@@ -1089,7 +1518,7 @@ body {
 
 .skeleton {
   height: 11px;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
   background: linear-gradient(90deg, #1c1f26, #23262e, #1c1f26);
   background-size: 200% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
@@ -1153,7 +1582,7 @@ textarea:focus-visible {
   min-width: 0;
   padding: 5px 8px;
   border: 1px solid var(--panel-edge);
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
@@ -1224,8 +1653,8 @@ textarea:focus-visible {
 
 .markdown code {
   padding: 1px 5px;
-  border-radius: 4px;
-  background: #0f1115;
+  border-radius: var(--r-xs);
+  background: var(--code-bg);
   font-family: "Cascadia Mono", Consolas, monospace;
   font-size: 12.5px;
 }
@@ -1234,8 +1663,8 @@ textarea:focus-visible {
   margin: 0 0 10px;
   padding: 10px 12px;
   border: 1px solid var(--panel-edge);
-  border-radius: 8px;
-  background: #0f1115;
+  border-radius: var(--r-md);
+  background: var(--code-bg);
   overflow-x: auto;
 }
 
@@ -1355,7 +1784,7 @@ textarea:focus-visible {
   margin: 0 auto;
   padding: 10px 14px;
   border: 1px solid var(--blocked);
-  border-radius: 9px;
+  border-radius: var(--r-md);
   background: rgba(240, 179, 126, 0.08);
 }
 
@@ -1369,7 +1798,7 @@ textarea:focus-visible {
 .approval__kind {
   flex: none;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--r-full);
   background: rgba(240, 179, 126, 0.16);
   color: var(--blocked);
   font-size: 11px;
@@ -1423,7 +1852,7 @@ textarea:focus-visible {
   margin-bottom: 4px;
   padding: 7px 9px;
   border: 0;
-  border-radius: 7px;
+  border-radius: var(--r-sm);
   background: none;
   color: var(--text);
   cursor: pointer;
@@ -1460,4 +1889,302 @@ textarea:focus-visible {
   font-size: 10px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------- settings */
+
+.settings {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 26px 22px 44px;
+}
+
+.settings__inner {
+  max-width: var(--column);
+  margin: 0 auto;
+}
+
+.settings__heading {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.settings__heading:not(:first-of-type) {
+  margin-top: 30px;
+}
+
+.settings__row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--r-lg);
+  background: var(--panel);
+}
+
+.settings__label {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings__name {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings__blurb {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings__control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.settings__preview {
+  display: block;
+  width: 46px;
+  height: 30px;
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--r-sm);
+  background-position: center;
+  background-size: cover;
+}
+
+/* ------------------------------------------------------------------ themes */
+
+.themes {
+  display: flex;
+  gap: 12px;
+}
+
+.theme {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.theme--chosen {
+  color: var(--text);
+}
+
+.theme--chosen .swatch {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* A miniature of the window, drawn rather than screenshotted so it cannot go
+   stale the next time the layout changes. */
+.swatch {
+  display: flex;
+  overflow: hidden;
+  height: 74px;
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--r-lg);
+}
+
+.swatch__half {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+  padding: 6px;
+}
+
+.swatch__half--light {
+  background: #ffffff;
+}
+
+.swatch__half--dark {
+  background: #1a1a1a;
+}
+
+/* "System" shows both; the other two show only their own. */
+.swatch--light .swatch__half--dark,
+.swatch--dark .swatch__half--light {
+  display: none;
+}
+
+.swatch__rail {
+  flex: none;
+  width: 22%;
+  border-radius: var(--r-xs);
+}
+
+.swatch__half--light .swatch__rail {
+  background: #ececec;
+}
+
+.swatch__half--dark .swatch__rail {
+  background: #101010;
+}
+
+.swatch__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  padding-top: 4px;
+}
+
+.swatch__line {
+  height: 4px;
+  border-radius: var(--r-full);
+}
+
+.swatch__line--short {
+  width: 60%;
+}
+
+.swatch__half--light .swatch__line {
+  background: #dcdcdc;
+}
+
+.swatch__half--dark .swatch__line {
+  background: #313131;
+}
+
+.swatch__box {
+  margin-top: auto;
+  width: 54%;
+  height: 7px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+.theme__name {
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------- pictures */
+
+/* What an agent drew, under the message that mentions it. A row rather than a
+   stack, because a turn that makes several variations is the common case and
+   scrolling past each one full-width buries the text that explains them. */
+.shots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 2px;
+}
+
+.shot {
+  display: block;
+  max-width: 320px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  cursor: zoom-in;
+  line-height: 0;
+}
+
+.shot:hover {
+  border-color: var(--edge-strong);
+}
+
+.shot img {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+}
+
+/* Full size, over everything. Click anywhere to dismiss: there is one thing on
+   screen and one thing to do with it, so a close button is furniture. */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  background: rgba(0, 0, 0, 0.86);
+  cursor: zoom-out;
+}
+
+.lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--r-md);
+  object-fit: contain;
+}
+
+/* An indeterminate bar along the bottom of a rail row, while a turn runs.
+   Absolute, so it cannot change the row's height and make the list jump the
+   moment an agent starts thinking. */
+.working {
+  position: absolute;
+  left: 9px;
+  right: 9px;
+  bottom: 3px;
+  height: 2px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: var(--panel-2);
+}
+
+.working::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 40%;
+  height: 100%;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  animation: working 1.1s ease-in-out infinite;
+}
+
+@keyframes working {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .working::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.5;
+  }
+}
+
+/* The row being dragged. Faded rather than hidden, so the list still reads as
+   the same length while it is being rearranged. */
+.row--lifted {
+  opacity: 0.4;
+}
+
+/* A rail row is a drag handle, so the pointer should not suggest a text
+   selection anywhere in it. */
+.rail__list li {
+  cursor: default;
 }

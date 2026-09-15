@@ -10,7 +10,7 @@
 
 import { useSyncExternalStore } from "react";
 
-import type { Scan } from "../ipc/bindings";
+import type { HarnessId, Scan } from "../ipc/bindings";
 import { harnessRescan, harnessSnapshot } from "../ipc/commands";
 
 export type Phase = "idle" | "scanning" | "ready" | "failed";
@@ -43,6 +43,16 @@ function snapshot(): HarnessState {
 
 export function useHarnessState(): HarnessState {
   return useSyncExternalStore(subscribe, snapshot);
+}
+
+/**
+ * The agents that can actually run something, in the order they were found.
+ *
+ * Not a hook: the chat store needs this when deciding what a new conversation
+ * should open with, and that happens in an action rather than in a render.
+ */
+export function readyHarnesses(): HarnessId[] {
+  return (state.scan?.harnesses ?? []).filter((h) => h.ready).map((h) => h.id);
 }
 
 /** Guards against two scans overlapping, which would only waste processes. */
@@ -86,4 +96,26 @@ function messageOf(error: unknown): string {
   if (typeof error === "string") return error;
   if (error instanceof Error) return error.message;
   return "the scan failed for an unknown reason";
+}
+
+// ---------------------------------------------------------------- hot reload
+
+/**
+ * This module is not hot-swappable, so an edit reloads the window.
+ *
+ * It holds live state and, more importantly, the transcript subscription
+ * registered once at startup. Vite replaces the module on every edit, and
+ * React Fast Refresh makes the components importing it self-accepting, so the
+ * update is absorbed without a page reload: the components start reading a
+ * fresh, empty copy while the subscription keeps writing into the old one.
+ *
+ * Nothing re-renders. A reply streams into a store nobody is looking at, the
+ * blocks still reach the database, and clicking the conversation appears to
+ * fix it because that path reloads from there. Which is a very convincing
+ * impression of a broken transcript, and cost a lot of time to recognise.
+ */
+if (import.meta.hot) {
+  import.meta.hot.accept(() => {
+    import.meta.hot?.invalidate();
+  });
 }

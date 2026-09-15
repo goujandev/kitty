@@ -2,6 +2,7 @@ import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "r
 
 import { toolMeta, type Block, type HarnessId, type ToolStatus } from "../ipc/bindings";
 import { Markdown, openLinksExternally } from "./Markdown";
+import { blockPictures, Pictures } from "./Pictures";
 import { Mark } from "./Marks";
 
 /**
@@ -368,6 +369,7 @@ function Body({
           <Markdown text={block.text} />
         </div>
       )}
+      <Pictures paths={blockPictures(block)} />
     </>
   );
 }
