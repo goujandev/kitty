@@ -36,6 +36,9 @@ jobs:
       - name: TypeScript and wire contract
         run: npm run check
 
+      - name: Update flow and release configuration
+        run: npm run test:updates
+
       - name: Formatting
         run: cargo fmt --all --check
 

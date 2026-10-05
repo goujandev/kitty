@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main window is allowed to do: its own commands, opening a vendor's documentation in the system browser, the folder picker used to choose a project, the four things a window with no title bar has to do for itself, and zooming itself, which Ctrl+plus needs and core:webview:default does not grant.",
+  "description": "What the main window is allowed to do: its own commands, opening a vendor's documentation in the system browser, the folder picker used to choose a project, the four things a window with no title bar has to do for itself, and zooming itself, which Ctrl+plus needs and core:webview:default does not grant. Signed app update checks, downloads, and installation from Settings.",
   "windows": [
     "main"
   ],
@@ -13,6 +13,7 @@
     "core:window:allow-close",
     "core:webview:allow-set-webview-zoom",
     "opener:allow-open-url",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "updater:default"
   ]
 }

@@ -2153,7 +2153,7 @@ textarea:focus-visible {
 
 .ws-sidebar__head { display: flex; align-items: center; justify-content: space-between; flex: none; height: 40px; padding: 4px 9px; }
 .ws-brand { display: inline-flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 5px; border: 0; border-radius: 6px; background: transparent; color: var(--text); cursor: pointer; font: inherit; font-size: 15px; font-weight: 560; letter-spacing: -.025em; }
-.ws-brand svg { flex: none; width: 19px; height: 19px; }
+.ws-brand svg { flex: none; width: 22px; height: 22px; }
 .ws-sidebar__actions { display: flex; align-items: center; gap: 1px; }
 .ws-nav { display: flex; flex-direction: column; flex: none; gap: 1px; padding: 7px 8px 12px; }
 .ws-nav__item { display: flex; align-items: center; gap: 9px; min-width: 0; width: 100%; height: 29px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: 13px; text-align: left; }
@@ -2747,3 +2747,14 @@ span.workspace-tab__select { cursor: default; }
   .workspace .chat--blank .welcome__mark { display: none; }
   .workspace .chat--blank .dock { padding-bottom: 14px; }
 }
+
+/* Updates live inside the existing Settings layout. */
+.update-status { margin: 18px 0; }
+.update-status p { margin: 6px 0; }
+.update-progress { display: grid; gap: 8px; margin: 16px 0; color: var(--muted); font-size: 12px; }
+.update-progress progress { width: 100%; height: 8px; accent-color: var(--accent); }
+.update-restart { display: grid; justify-items: start; gap: 12px; margin-top: 16px; }
+.update-restart p { margin: 0; }
+.update-notes { margin-top: 24px; font-size: 13px; }
+.update-notes summary { cursor: pointer; color: var(--muted); }
+.update-notes p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; user-select: text; }

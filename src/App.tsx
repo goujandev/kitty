@@ -20,6 +20,7 @@ import { ThreadLibrary } from "./views/ThreadLibrary";
 import { SearchDialog } from "./views/SearchDialog";
 import { SettingsDialog, type Section } from "./views/Settings";
 import { Icon } from "./views/Icon";
+import { initialiseUpdates } from "./stores/updateStore";
 import { WindowControls } from "./views/WindowControls";
 
 /** Shared workspace chrome around Kitty's existing session and model stores. */
@@ -100,6 +101,7 @@ export function App(): React.ReactElement {
     void initialise();
     void loadDefaultChoice().then(restoreLastProject);
     void loadAppearance();
+    initialiseUpdates();
 
     const unlisten = listen();
     return () => {

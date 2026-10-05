@@ -1093,6 +1093,7 @@ pub fn run() {
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // Pictures reach the webview as bytes over their own scheme rather
         // than as base64 in the transcript. A 3MB render becomes 4MB of text
         // in the database, in memory and across IPC if you inline it, and it

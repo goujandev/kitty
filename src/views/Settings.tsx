@@ -17,20 +17,22 @@ import { HarnessList } from "./HarnessList";
 import { ModelTools } from "./ModelPicker";
 import { WindowControls } from "./WindowControls";
 import { Icon } from "./Icon";
+import { UpdateSettings } from "./UpdateSettings";
 
 /**
  * Settings.
  *
- * Two sections, both of which exist because something in the app needs them
+ * Sections which exist because something in the app needs them
  * today. No placeholders for things we have not built: a settings screen full
  * of empty rooms tells the user the app is unfinished, and every one of them
  * has to be maintained until it is filled.
  */
-export type Section = "appearance" | "agents";
+export type Section = "appearance" | "agents" | "updates";
 
 export const SECTIONS: { id: Section; name: string }[] = [
   { id: "appearance", name: "Appearance" },
   { id: "agents", name: "Agents" },
+  { id: "updates", name: "Updates" },
 ];
 
 /** Settings stays above the workspace, so closing it returns to the same thread. */
@@ -55,9 +57,9 @@ export function SettingsDialog({ section, onSelect, onClose }: {
       <header className="settings-dialog__head"><h2 id="settings-title">Settings</h2><button type="button" className="icon-button" aria-label="Close settings" onClick={onClose}><Icon name="close" /></button></header>
       <div className="settings-dialog__body">
         <nav className="settings-dialog__nav" aria-label="Settings sections">
-          {SECTIONS.map(entry => <button type="button" key={entry.id} className={entry.id === section ? "is-active" : ""} aria-current={entry.id === section ? "page" : undefined} onClick={() => onSelect(entry.id)}><Icon name={entry.id === "appearance" ? "panel" : "sparkles"} />{entry.name}</button>)}
+          {SECTIONS.map(entry => <button type="button" key={entry.id} className={entry.id === section ? "is-active" : ""} aria-current={entry.id === section ? "page" : undefined} onClick={() => onSelect(entry.id)}><Icon name={entry.id === "appearance" ? "panel" : entry.id === "updates" ? "arrow" : "sparkles"} />{entry.name}</button>)}
         </nav>
-        <div className="settings-dialog__content"><h3>{SECTIONS.find(entry => entry.id === section)?.name}</h3>{section === "agents" ? <AgentSettings /> : <AppearanceSettings />}</div>
+        <div className="settings-dialog__content"><h3>{SECTIONS.find(entry => entry.id === section)?.name}</h3>{section === "agents" ? <AgentSettings /> : section === "updates" ? <UpdateSettings /> : <AppearanceSettings />}</div>
       </div>
     </div>
   </div>;
@@ -115,7 +117,7 @@ export function SettingsView({
       </header>
 
       <div className="canvas">
-        {section === "agents" ? <AgentSettings /> : <AppearanceSettings />}
+        {section === "agents" ? <AgentSettings /> : section === "updates" ? <UpdateSettings /> : <AppearanceSettings />}
       </div>
     </main>
   );

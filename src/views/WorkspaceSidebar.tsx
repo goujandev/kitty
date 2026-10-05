@@ -9,7 +9,7 @@ import { forgetProject, useChat } from "../stores/chatStore";
 import { useHarnessState } from "../stores/harnessStore";
 import { refresh, reorder, useProjects } from "../stores/projectStore";
 import { Grip } from "./Grip";
-import { Icon } from "./Icon";
+import { Icon, KittyMark } from "./Icon";
 import { RowMenu } from "./RowMenu";
 
 export interface WorkspaceSidebarProps {
@@ -91,7 +91,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps): React.ReactEleme
       ref={resize.setPaneRef} aria-label="Workspace navigation">
       <header className="ws-sidebar__head" data-tauri-drag-region>
         <button type="button" className="ws-brand" title="Kitty home" onClick={props.onHome}>
-          <Icon name="sparkles" size={19} /><span>Kitty</span>
+          <KittyMark size={22} /><span>Kitty</span>
         </button>
         <div className="ws-sidebar__actions">
           <button type="button" className="ws-icon-button" title="Search threads" aria-label="Search threads" onClick={props.onSearch}>

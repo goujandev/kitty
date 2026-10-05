@@ -12,6 +12,10 @@ The installer includes the app and an uninstaller, and installs for your Windows
 
 Kitty uses your locally installed **Codex** or **Claude Code** CLI for agent conversations. Install and sign in to at least one of those agents, then open a project folder in Kitty. The agent settings show which agents are available.
 
+## Updates
+
+Kitty checks for updates at launch. Open **Settings > Updates** to check manually, download a new version, and restart to install it. Earlier versions need one manual installation of v0.1.1 or newer; later releases update through the app.
+
 ## Workspace
 
 - Projects and conversations in one collapsible, resizable sidebar.
@@ -34,15 +38,18 @@ npm start
 To build the Windows installer:
 
 ```powershell
-npm run bundle -- -- --locked
+$env:TAURI_SIGNING_PRIVATE_KEY = Join-Path $env:USERPROFILE '.tauri/kitty-updater.key'
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ''
+npm run bundle -- --ci -- --locked
 ```
 
-The installer is written to `target/release/bundle/nsis/`.
+The installer is written to `target/release/bundle/nsis/`. See [release setup and verification](docs/releases.md) for signing secrets, publishing, and the installed-app smoke test.
 
 ## Checks
 
 ```powershell
 npm run check
+npm run test:updates
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace

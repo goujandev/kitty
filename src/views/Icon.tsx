@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useId, type CSSProperties } from "react";
 
 const paths = {
   home: "M3 9l5-5 5 5M4.5 7.5V14h7V7.5M6.5 14v-4h3v4",
@@ -27,7 +27,23 @@ export function Icon({ name, size = 16, style }: { name: IconName; size?: number
   return <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={style}><path d={paths[name]} /></svg>;
 }
 
-/** Kitty's own mark, drawn independently for the new workspace. */
+/** Kitty's tilted, sleepy cat mascot, with a bold monochrome contour. */
 export function KittyMark({ size = 24 }: { size?: number }): React.ReactElement {
-  return <svg width={size} height={size} viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M6 13V5l7 5h6l7-5v8c2 2 3 4 3 7 0 6-6 10-13 10S3 26 3 20c0-3 1-5 3-7Z" fill="currentColor" opacity=".12"/><path d="M6 13V5l7 5h6l7-5v8c2 2 3 4 3 7 0 6-6 10-13 10S3 26 3 20c0-3 1-5 3-7Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M10 18h1m10 0h1m-8 4 2 2 2-2M2 21l6 1m-5 4 5-2m16-2 6-1m-6 3 5 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>;
+  const maskId = useId();
+  const outline = "M12 27L10 11Q9 7 13 9L25 17Q34 14 41 17L49 10Q52 8 52 12L51 27Q57 34 54 43C50 54 39 59 27 56C14 53 6 44 8 35Q9 30 12 27Z";
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
+      <defs>
+        <mask id={maskId} x="0" y="0" width="64" height="64" maskUnits="userSpaceOnUse">
+          <g transform="rotate(-10 32 32)" strokeLinecap="round" strokeLinejoin="round">
+            <path d={outline} fill="white" stroke="white" strokeWidth="7" />
+            <path d={outline} fill="white" stroke="black" strokeWidth="3" />
+            <path d="M18 32Q22 28 27 31M36 30Q41 26 45 29M33 39Q32 44 28 42M33 39Q37 43 40 40M17 39L12 38M45 37L50 35" fill="none" stroke="black" strokeWidth="2.8" />
+            <path d="M29.5 36.5Q33 35 36.5 36L33 40Z" fill="black" />
+          </g>
+        </mask>
+      </defs>
+      <rect width="64" height="64" fill="currentColor" mask={`url(#${maskId})`} />
+    </svg>
+  );
 }
