@@ -81,7 +81,7 @@ mod tests {
     #[test]
     fn finds_nothing_in_an_empty_environment() {
         let env = EnvSnapshot::from_parts(Vec::new(), HashMap::new());
-        assert!(candidates(&CLAUDE, &env).is_empty());
+        assert_eq!(candidates(&CLAUDE, &env), []);
     }
 
     #[test]

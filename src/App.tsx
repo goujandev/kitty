@@ -6,41 +6,89 @@ import {
   newChat,
   newSession,
   openById,
-  openSession,
   openSessionAnywhere,
-  removeSession,
-  reorderSessions,
   loadDefaultChoice,
   restoreLastProject,
   useChat,
 } from "./stores/chatStore";
 import { loadAppearance, nudgeZoom } from "./stores/appearanceStore";
 import { initialise, useHarnessState } from "./stores/harnessStore";
-import { ChatRail } from "./views/ChatRail";
+import { useProjects } from "./stores/projectStore";
 import { ChatView } from "./views/ChatView";
-import { ProjectRail } from "./views/ProjectRail";
-import { SettingsRail, SettingsView, type Section } from "./views/Settings";
+import { WorkspaceSidebar } from "./views/WorkspaceSidebar";
+import { ThreadLibrary } from "./views/ThreadLibrary";
+import { SearchDialog } from "./views/SearchDialog";
+import { SettingsDialog, type Section } from "./views/Settings";
+import { Icon } from "./views/Icon";
+import { WindowControls } from "./views/WindowControls";
 
-/**
- * Three panes, left to right: the things you work on, the conversations in the
- * chosen one, and the conversation itself.
- *
- * Nothing is behind a tab. Picking a project and picking a chat are one click
- * each, and both stay on screen while you read the third pane. The middle pane
- * goes away for a project with no folder, which is a single conversation and
- * so has nothing for that pane to list.
- */
+/** Shared workspace chrome around Kitty's existing session and model stores. */
 export function App(): React.ReactElement {
-  // Null means the conversation is on screen; a section means settings is.
+  // Settings overlays the workspace without replacing its conversation.
   const [settings, setSettings] = useState<Section | null>(null);
+  const [view, setView] = useState<"home" | "chat" | "threads">("home");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("kitty:sidebar-collapsed") === "true"; }
+    catch { return false; }
+  });
+  const [tabs, setTabs] = useState<{ id: string; projectId: string; title: string }[]>([]);
   const chat = useChat();
   const { scan } = useHarnessState();
-  // The middle rail lists the conversations in a folder, so it only exists
-  // when there is a folder. A chat with no folder holds exactly one
-  // conversation and nothing else is open at all -- in both cases the rail's
-  // only possible content is an apology for being empty.
-  const inFolder = chat.project?.root != null;
+  const projectIndex = useProjects();
   const firstReady = (scan?.harnesses ?? []).find((h) => h.ready)?.id;
+  const startThread = () => {
+    if (!firstReady) { setSettings("agents"); return; }
+    setSettings(null);
+    setView("chat");
+    if (chat.project && (chat.project.root !== null || chat.activeId === null)) newSession();
+    else void newChat();
+  };
+  const openThread = (projectId: string, id: string) => {
+    setView("chat");
+    setSettings(null);
+    void openSessionAnywhere(projectId, id);
+  };
+  const toggleSidebar = () => setCollapsed((value) => {
+    try { localStorage.setItem("kitty:sidebar-collapsed", String(!value)); } catch { /* Window state still works without storage. */ }
+    return !value;
+  });
+
+  useEffect(() => {
+    if (!chat.activeId || !chat.project) return;
+    // A project switch loads its rows before opening the requested thread.
+    // Do not attribute the previous active thread to that new project.
+    const session = chat.sessions.find(s => s.id === chat.activeId && s.projectId === chat.project?.id);
+    if (!session) return;
+    const entry = { id: session.id, projectId: session.projectId, title: session.title ?? "Untitled thread" };
+    setTabs(previous => {
+      const existing = previous.findIndex(tab => tab.id === entry.id);
+      if (existing >= 0) {
+        if (previous[existing]?.title === entry.title && previous[existing]?.projectId === entry.projectId) return previous;
+        return previous.map(tab => tab.id === entry.id ? entry : tab);
+      }
+      return [...previous, entry];
+    });
+  }, [chat.activeId, chat.project, chat.sessions]);
+
+  useEffect(() => { if (chat.activeId) setView("chat"); }, [chat.activeId]);
+
+  useEffect(() => {
+    if (projectIndex.loading || projectIndex.error) return;
+    const ids = new Set(projectIndex.projects.map(project => project.id));
+    setTabs(previous => previous.some(tab => !ids.has(tab.projectId)) ? previous.filter(tab => ids.has(tab.projectId)) : previous);
+  }, [projectIndex.projects, projectIndex.loading, projectIndex.error]);
+
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      if (event.key.toLowerCase() === "k") { event.preventDefault(); setSearchOpen(true); }
+      if (event.key.toLowerCase() === "b") { event.preventDefault(); toggleSidebar(); }
+      if (event.key.toLowerCase() === "n" && firstReady) { event.preventDefault(); startThread(); }
+    };
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, [chat.project, firstReady]);
 
   useEffect(() => {
     // Deliberately after first paint. Probing spawns child processes and an
@@ -108,51 +156,39 @@ export function App(): React.ReactElement {
   }, []);
 
   return (
-    <div className={`app ${!inFolder && !settings ? "app--solo" : ""}`}>
-      <ProjectRail
-        activeId={chat.project?.id ?? null}
-        canChat={firstReady !== undefined}
-        inSettings={settings !== null}
-        onOpen={(projectId) => {
-          setSettings(null);
-          void openById(projectId);
-        }}
-        onAdd={() => {
-          setSettings(null);
-          void chooseProject();
-        }}
-        onNewChat={() => {
-          setSettings(null);
-          void newChat();
-        }}
-        onOpenSettings={() => setSettings("appearance")}
-      />
-
-      {settings ? (
-        <SettingsRail
-          section={settings}
-          onSelect={setSettings}
-          onClose={() => setSettings(null)}
-        />
-      ) : inFolder ? (
-        <ChatRail
-          projectName={chat.project?.name ?? ""}
-          sessions={chat.sessions}
-          running={chat.running}
-          activeId={chat.activeId}
-          draft={chat.draft !== null}
-          canStart={chat.project !== null && firstReady !== undefined}
-          onNewSession={newSession}
-          onOpenSession={(id) => void openSession(id)}
-          onDeleteSession={(id) => void removeSession(id)}
-          onReorder={(ids) => void reorderSessions(ids)}
-          onOpenAnywhere={(projectId, sessionId) =>
-            void openSessionAnywhere(projectId, sessionId)
-          }
-        />
-      ) : null}
-
-      {settings ? <SettingsView section={settings} /> : <ChatView />}
+    <div className={`workspace ${collapsed ? "workspace--collapsed" : ""}`}>
+      <WorkspaceSidebar collapsed={collapsed} activeView={settings ? "settings" : view}
+        onToggleCollapse={toggleSidebar} onHome={startThread} onThreads={() => setView("threads")}
+        onSearch={() => setSearchOpen(true)} onSettings={() => setSettings("appearance")}
+        onNewThread={startThread} onAddProject={() => { setView("chat"); void chooseProject(); }}
+        onOpenProject={(id) => { setView("chat"); void openById(id); }} onOpenSession={openThread}
+        onThreadDeleted={(id) => setTabs(previous => previous.filter(tab => tab.id !== id))} />
+      <div className="workspace__main">
+        <header className="workspace-tabs" data-tauri-drag-region>
+          {collapsed && <button className="icon-button" type="button" aria-label="Expand sidebar" title="Expand sidebar (Ctrl+B)" onClick={toggleSidebar}><Icon name="panel" /></button>}
+          <div className="workspace-tabs__list" aria-label="Open threads">
+            {tabs.map((tab) => <div key={tab.id} className={`workspace-tab ${view !== "threads" && chat.activeId === tab.id ? "workspace-tab--active" : ""}`}>
+              <button className="workspace-tab__select" type="button" onClick={() => openThread(tab.projectId, tab.id)} aria-current={view !== "threads" && chat.activeId === tab.id ? "page" : undefined}><Icon name="message" size={14} /><span>{tab.title}</span></button>
+              <button className="workspace-tab__close" type="button" aria-label={`Close tab ${tab.title}`} onClick={() => {
+                const remaining = tabs.filter(t => t.id !== tab.id);
+                setTabs(remaining);
+                if (tab.id === chat.activeId) {
+                  const next = remaining[remaining.length - 1];
+                  if (next) openThread(next.projectId, next.id); else startThread();
+                }
+              }}><Icon name="close" size={12} /></button>
+            </div>)}
+            {view === "threads" ? <div className="workspace-tab workspace-tab--active"><span className="workspace-tab__select"><Icon name="threads" size={14} />Threads</span></div>
+              : chat.activeId === null && <div className="workspace-tab workspace-tab--active"><span className="workspace-tab__select"><Icon name="sparkles" size={14} />New thread</span></div>}
+            <button className="icon-button workspace-tabs__new" type="button" disabled={!firstReady} aria-label="New thread" title="New thread (Ctrl+N)" onClick={startThread}><Icon name="plus" size={14} /></button>
+          </div>
+          <span className="workspace-tabs__drag" data-tauri-drag-region />
+          <WindowControls />
+        </header>
+        {view === "threads" ? <ThreadLibrary onOpenSession={openThread} onNewThread={startThread} /> : <ChatView onOpenSettings={() => setSettings("agents")} onNewThread={startThread} />}
+      </div>
+      {searchOpen && <SearchDialog onClose={() => setSearchOpen(false)} onOpenSession={(projectId, id) => { setSearchOpen(false); openThread(projectId, id); }} />}
+      {settings && <SettingsDialog section={settings} onSelect={setSettings} onClose={() => setSettings(null)} />}
     </div>
   );
 }

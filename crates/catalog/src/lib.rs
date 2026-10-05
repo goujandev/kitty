@@ -548,7 +548,7 @@ mod tests {
     fn a_model_with_no_effort_levels_reports_none() {
         // Haiku genuinely has none; an empty list is an answer, not a gap.
         let m = claude_model(&json!({"value": "haiku", "displayName": "Haiku"})).expect("model");
-        assert!(m.efforts.is_empty());
+        assert_eq!(m.efforts, [] as [String; 0]);
         assert_eq!(m.default_effort, None);
     }
 

@@ -402,21 +402,23 @@ export function newSession(): void {
  * or the project is left empty rather than showing a transcript that is no
  * longer anywhere.
  */
-export async function removeSession(sessionId: string): Promise<void> {
+export async function removeSession(sessionId: string): Promise<boolean> {
   try {
     await ipc.deleteSession(sessionId);
     const left = state.sessions.filter((s) => s.id !== sessionId);
     set({ sessions: left });
 
-    if (state.activeId !== sessionId) return;
+    if (state.activeId !== sessionId) return true;
     const next = left[0];
     if (next) {
       await openSession(next.id);
-      return;
+      return true;
     }
     set({ activeId: null, blocks: [], busy: false, approval: null });
+    return true;
   } catch (error) {
     set({ error: message(error) });
+    return false;
   }
 }
 
@@ -427,7 +429,7 @@ export async function openSession(sessionId: string): Promise<void> {
     draft: null,
     draftModel: null,
     blocks: [],
-    busy: false,
+    busy: sessionId in state.running,
     status: null,
     notice: null,
     usage: null,

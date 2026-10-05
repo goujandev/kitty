@@ -21,8 +21,8 @@ use kitty_engine::{Session, SessionSpec};
 /// Builds a fake CLI: a batch file that prints canned frames and ignores its
 /// arguments, so the engine's real launch flags do not disturb it.
 ///
-/// `wait` makes it block on stdin afterwards, which is how a real CLI behaves
-/// while it waits for an answer to a permission request.
+/// `wait` makes it consume the initial turn before printing, then block on
+/// stdin again for the answer to a permission request.
 fn fake_cli(dir: &Path, frames: &[&str], wait: bool) -> PathBuf {
     let data = dir.join("frames.jsonl");
     std::fs::write(&data, frames.join("\n") + "\n").expect("write frames");
@@ -31,7 +31,7 @@ fn fake_cli(dir: &Path, frames: &[&str], wait: bool) -> PathBuf {
     // `type` streams the file. Without `wait` the process then exits, which is
     // how a real CLI behaves once a turn is over.
     let body = if wait {
-        "@echo off\r\ntype \"%~dp0frames.jsonl\"\r\nset /p answer=\r\n"
+        "@echo off\r\nset /p turn=\r\ntype \"%~dp0frames.jsonl\"\r\nset /p answer=\r\n"
     } else {
         "@echo off\r\ntype \"%~dp0frames.jsonl\"\r\n"
     };

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import {
   chooseBackground,
   removeBackground,
@@ -15,6 +16,7 @@ import { useHarnessState } from "../stores/harnessStore";
 import { HarnessList } from "./HarnessList";
 import { ModelTools } from "./ModelPicker";
 import { WindowControls } from "./WindowControls";
+import { Icon } from "./Icon";
 
 /**
  * Settings.
@@ -30,6 +32,36 @@ export const SECTIONS: { id: Section; name: string }[] = [
   { id: "appearance", name: "Appearance" },
   { id: "agents", name: "Agents" },
 ];
+
+/** Settings stays above the workspace, so closing it returns to the same thread. */
+export function SettingsDialog({ section, onSelect, onClose }: {
+  section: Section; onSelect: (section: Section) => void; onClose: () => void;
+}): React.ReactElement {
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    panel.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    return () => previous?.focus();
+  }, []);
+  return <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="settings-dialog" ref={panel} role="dialog" aria-modal="true" aria-labelledby="settings-title" onKeyDown={event => {
+      if (event.key === "Escape" && !panel.current?.querySelector(".pop__menu")) { event.preventDefault(); onClose(); }
+      if (event.key !== "Tab") return;
+      const controls = [...(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]') ?? [])].filter(element => element.offsetParent !== null);
+      const first = controls[0]; const last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }}>
+      <header className="settings-dialog__head"><h2 id="settings-title">Settings</h2><button type="button" className="icon-button" aria-label="Close settings" onClick={onClose}><Icon name="close" /></button></header>
+      <div className="settings-dialog__body">
+        <nav className="settings-dialog__nav" aria-label="Settings sections">
+          {SECTIONS.map(entry => <button type="button" key={entry.id} className={entry.id === section ? "is-active" : ""} aria-current={entry.id === section ? "page" : undefined} onClick={() => onSelect(entry.id)}><Icon name={entry.id === "appearance" ? "panel" : "sparkles"} />{entry.name}</button>)}
+        </nav>
+        <div className="settings-dialog__content"><h3>{SECTIONS.find(entry => entry.id === section)?.name}</h3>{section === "agents" ? <AgentSettings /> : <AppearanceSettings />}</div>
+      </div>
+    </div>
+  </div>;
+}
 
 /** The settings nav, in place of the conversations rail. */
 export function SettingsRail({
@@ -127,6 +159,7 @@ function DefaultModel(): React.ReactElement {
 
       <div className="settings__control">
         <ModelTools
+          below
           harness={choice?.harness ?? ready[0]?.id ?? null}
           harnesses={ready}
           catalogs={chat.catalogs}

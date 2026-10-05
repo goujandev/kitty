@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+// Drafts stay in memory while the reader moves between workspace tabs.
+const drafts = new Map<string, string>();
+const consumedSuggestions = new Map<string, number>();
+
 /**
  * The input.
  *
@@ -18,6 +22,8 @@ export function Composer({
   tools,
   onSend,
   onCancel,
+  suggestion,
+  storageKey,
 }: {
   busy: boolean;
   disabled: boolean;
@@ -27,9 +33,21 @@ export function Composer({
   tools?: React.ReactNode;
   onSend: (text: string) => void;
   onCancel: () => void;
+  suggestion?: { text: string; id: number } | null;
+  storageKey: string;
 }): React.ReactElement {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => drafts.get(storageKey) ?? "");
   const box = useRef<HTMLTextAreaElement>(null);
+  const updateText = useCallback((value: string) => {
+    if (value) drafts.set(storageKey, value); else drafts.delete(storageKey);
+    setText(value);
+  }, [storageKey]);
+  useEffect(() => {
+    if (!suggestion || consumedSuggestions.get(storageKey) === suggestion.id) return;
+    consumedSuggestions.set(storageKey, suggestion.id);
+    updateText(suggestion.text);
+    box.current?.focus();
+  }, [suggestion, storageKey, updateText]);
 
   // Opening a session should leave you ready to type. Anything else makes the
   // first interaction a hunt for the input.
@@ -54,8 +72,8 @@ export function Composer({
     const trimmed = text.trimEnd();
     if (!trimmed || busy || disabled) return;
     onSend(trimmed);
-    setText("");
-  }, [busy, disabled, onSend, text]);
+    updateText("");
+  }, [busy, disabled, onSend, text, updateText]);
 
   return (
     <div className="composer">
@@ -69,9 +87,9 @@ export function Composer({
           placeholder={
             disabled
               ? placeholder ?? "Not ready yet"
-              : "Ask anything, Enter to send"
+              : "Ask Kitty to build, fix, or explore…"
           }
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => updateText(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();

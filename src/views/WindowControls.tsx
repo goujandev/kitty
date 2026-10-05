@@ -1,4 +1,5 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { isTauri } from "@tauri-apps/api/core";
 
 /**
  * Minimise, maximise and close, drawn by the app.
@@ -10,7 +11,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
  * itself, so these buttons still receive their clicks.
  */
 export function WindowControls(): React.ReactElement {
-  const win = getCurrentWindow();
+  const win = isTauri() ? getCurrentWindow() : null;
 
   return (
     <div className="wincontrols">
@@ -18,7 +19,8 @@ export function WindowControls(): React.ReactElement {
         type="button"
         className="wincontrol"
         aria-label="Minimise"
-        onClick={() => void win.minimize()}
+        disabled={!win}
+        onClick={() => void win?.minimize()}
       >
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
           <line x1="1" y1="5" x2="9" y2="5" />
@@ -29,7 +31,8 @@ export function WindowControls(): React.ReactElement {
         type="button"
         className="wincontrol"
         aria-label="Maximise"
-        onClick={() => void win.toggleMaximize()}
+        disabled={!win}
+        onClick={() => void win?.toggleMaximize()}
       >
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
           <rect x="1.5" y="1.5" width="7" height="7" fill="none" />
@@ -40,7 +43,8 @@ export function WindowControls(): React.ReactElement {
         type="button"
         className="wincontrol wincontrol--close"
         aria-label="Close"
-        onClick={() => void win.close()}
+        disabled={!win}
+        onClick={() => void win?.close()}
       >
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
           <line x1="1.5" y1="1.5" x2="8.5" y2="8.5" />

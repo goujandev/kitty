@@ -254,7 +254,7 @@ mod tests {
         let mut input = Vec::new();
         input.extend(std::iter::repeat_n(b'x', 5_000));
         let (frames, trailing) = drain(&input, 1024);
-        assert!(frames.is_empty());
+        assert_eq!(frames, []);
         assert!(matches!(trailing, Some(Frame::Oversized { .. })));
     }
 

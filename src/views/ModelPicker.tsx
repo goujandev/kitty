@@ -41,6 +41,7 @@ export function ModelTools({
   onRefresh,
   onChoose,
   onStar,
+  below,
 }: {
   /** The vendor in force, from the open session or the pending draft. */
   harness: HarnessId | null;
@@ -68,6 +69,7 @@ export function ModelTools({
   onRefresh: (harness: HarnessId) => void;
   onChoose: (harness: HarnessId, model: string, effort: string | null) => void;
   onStar: (harness: HarnessId, model: string) => void;
+  below?: boolean;
 }): React.ReactElement | null {
   // With no explicit choice the CLI's own default is in force, so its entry is
   // what the effort levels come from.
@@ -81,6 +83,7 @@ export function ModelTools({
   return (
     <>
       <Popover
+        below={below}
         disabled={disabled}
         onOpen={onOpen}
         title="Model"
@@ -111,6 +114,7 @@ export function ModelTools({
 
       {levels.length > 0 && shown && harness && (
         <Popover
+          below={below}
           narrow
           disabled={disabled}
           title="Reasoning effort"

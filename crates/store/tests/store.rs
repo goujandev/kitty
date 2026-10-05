@@ -277,7 +277,7 @@ fn an_empty_search_returns_nothing_rather_than_everything() {
         .append_block(&session, BlockKind::User, "hello")
         .expect("append");
 
-    assert!(store.search("   ", 10).expect("search").is_empty());
+    assert_eq!(store.search("   ", 10).expect("search"), []);
 }
 
 #[test]
@@ -400,7 +400,7 @@ fn deleting_a_session_removes_it_from_search() {
         store.search("parsnips", 10).expect("search").is_empty(),
         "search still returns a conversation that no longer exists"
     );
-    assert!(store.blocks(&session).expect("blocks").is_empty());
+    assert_eq!(store.blocks(&session).expect("blocks"), []);
 }
 
 #[test]

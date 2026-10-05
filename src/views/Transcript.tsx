@@ -153,6 +153,11 @@ export function Transcript({
       if (column.clientWidth === width.current) return;
       width.current = column.clientWidth;
       heights.current.clear();
+      // Row observers can fire before the column observer. Read all mounted
+      // rows now so clearing the cache does not discard their new heights.
+      for (const row of column.querySelectorAll<HTMLElement>("[data-block-seq]")) {
+        heights.current.set(Number(row.dataset.blockSeq), row.offsetHeight);
+      }
       setMeasured((n) => n + 1);
     };
 
@@ -252,7 +257,7 @@ const Row = memo(function Row({
   }, [block.seq, onMeasure]);
 
   return (
-    <div className={`row msg msg--${block.kind}`} style={{ top }} ref={node}>
+    <div className={`row msg msg--${block.kind}`} style={{ top }} ref={node} data-block-seq={block.seq}>
       <Body block={block} streaming={streaming} />
       {signed && (
         // Who said it, stated after the fact rather than announced before it.

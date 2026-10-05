@@ -134,11 +134,11 @@ mod tests {
     fn descriptors_are_populated() {
         for id in HarnessId::ALL {
             let d = id.descriptor();
-            assert!(!d.label.is_empty());
-            assert!(!d.vendor.is_empty());
-            assert!(!d.exe_stem.is_empty());
-            assert!(!d.install_command.is_empty());
-            assert!(!d.login_command.is_empty());
+            assert_ne!(d.label, "");
+            assert_ne!(d.vendor, "");
+            assert_ne!(d.exe_stem, "");
+            assert_ne!(d.install_command, "");
+            assert_ne!(d.login_command, "");
             assert!(d.docs_url.starts_with("https://"));
         }
     }

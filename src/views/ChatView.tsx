@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   agentName,
   cancel,
@@ -19,12 +20,17 @@ import { effortLabel, ModelTools } from "./ModelPicker";
 import { Chevron } from "./Popover";
 import { Transcript } from "./Transcript";
 import { Usage } from "./Usage";
-import { WindowControls } from "./WindowControls";
+import { Icon, KittyMark } from "./Icon";
+import { ThreadDetails } from "./ThreadDetails";
 
 /** The conversation itself. Both rails live beside it, not inside it. */
-export function ChatView(): React.ReactElement {
+export function ChatView({ onOpenSettings, onNewThread }: { onOpenSettings: () => void; onNewThread: () => void }): React.ReactElement {
   const chat = useChat();
   const { background } = useAppearance();
+  const [suggestion, setSuggestion] = useState<{ text: string; id: number; context: string } | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const composerKey = chat.activeId ?? `${chat.project?.id ?? "empty"}:draft`;
+  const { scan } = useHarnessState();
   const harness = currentHarness();
   const { effort } = currentModel();
   // Nothing said yet, whether that is a fresh conversation or none at all.
@@ -38,10 +44,10 @@ export function ChatView(): React.ReactElement {
   // chosen.
   const cannotType = chat.project
     ? "No agent is ready — see Settings › Agents"
-    : "Start a chat on the left";
+    : "Create a thread to get started";
   const title =
     chat.sessions.find((s) => s.id === chat.activeId)?.title ??
-    (chat.draft ? "New conversation" : null);
+    (chat.draft ? "New thread" : null);
 
   // "Opus (1M context) Medium" -- the model and how hard it thought, which is
   // the pair that actually explains a reply.
@@ -52,14 +58,19 @@ export function ChatView(): React.ReactElement {
       {/* Full width and flush to the top, because the close button has to
           reach the corner of the screen. Everything below it is inset. */}
       <header className="chat__head" data-tauri-drag-region>
-        <span
-          className={`chat__dot ${chat.busy ? "chat__dot--busy" : ""}`}
-          aria-hidden="true"
-        />
-        <h1 className="chat__title">{title ?? "kitty"}</h1>
-        <WindowControls />
+        <div className="chat__breadcrumb">
+          <Icon name={chat.project?.root ? "folder" : "message"} size={14} />
+          <span>{chat.project?.root ? chat.project.name : "Personal"}</span>
+          <span className="chat__breadcrumb-divider">/</span>
+          <h1 className="chat__title">{title ?? "New thread"}</h1>
+        </div>
+        <span className="chat__head-gap" data-tauri-drag-region />
+        {chat.busy && <span className="chat__head-status"><span className="spinner" />Working</span>}
+        <button type="button" className={`icon-button ${detailsOpen ? "is-active" : ""}`} aria-label="Thread details" aria-expanded={detailsOpen} title="Thread details" onClick={() => setDetailsOpen(value => !value)}><Icon name="panel" size={15} /></button>
+        <button type="button" className="icon-button" aria-label="Agent settings" title="Agent settings" onClick={onOpenSettings}><Icon name="settings" size={15} /></button>
       </header>
 
+      <div className="chat__body">
       <div className="canvas">
         {/* The picture stays for the whole conversation, but steps back once
             there is something to read: a photograph behind a wall of text is a
@@ -87,7 +98,16 @@ export function ChatView(): React.ReactElement {
           </p>
         )}
 
-        {blank ? null : (
+        {blank ? <div className="welcome">
+          <div className="welcome__mark"><KittyMark size={36} /></div>
+          <h2>What would you like to build?</h2>
+          <p>Start an idea, explore your code, or work through a problem.</p>
+          {!live && <div className="welcome__actions">
+            <button type="button" className="button button--primary" disabled={!(scan?.harnesses ?? []).some(agent => agent.ready)} onClick={onNewThread}><Icon name="plus" />New thread</button>
+            <button type="button" className="button" onClick={() => void chooseProject()}><Icon name="folder" />Open a project</button>
+          </div>}
+          {!live && !(scan?.harnesses ?? []).some(agent => agent.ready) && <button type="button" className="welcome__setup" onClick={onOpenSettings}>Set up an agent to start chatting <Icon name="chevron" size={12} /></button>}
+        </div> : (
         // Keyed per conversation. Row heights are remembered by block
         // sequence, and every session numbers its blocks from zero, so
         // without this a new conversation inherits the old one's measurements.
@@ -112,14 +132,27 @@ export function ChatView(): React.ReactElement {
         <div className="dock">
           <ContextRow />
           <Composer
+            key={composerKey}
+            storageKey={composerKey}
             busy={chat.busy}
             disabled={!live}
             placeholder={cannotType}
             tools={<Tools />}
             onSend={(text) => void send(text)}
             onCancel={() => void cancel()}
+            suggestion={suggestion?.context === composerKey ? suggestion : null}
           />
+          {blank && live && <div className="welcome__suggestions" aria-label="Prompt suggestions">
+            {[
+              { icon: "sparkles" as const, label: "Build something", text: "Help me build a new feature. " },
+              { icon: "code" as const, label: "Explore this project", text: "Explore this project and explain how it is organized." },
+              { icon: "activity" as const, label: "Fix a problem", text: "Help me diagnose and fix a problem in this project. " },
+            ].map(item => <button type="button" key={item.label} disabled={chat.busy} onClick={() => setSuggestion({ text: item.text, id: Date.now(), context: composerKey })}><Icon name={item.icon} size={14} />{item.label}<Icon name="chevron" size={12} /></button>)}
+          </div>}
+          <p className="composer__hint">Enter to send <span>·</span> Shift + Enter for a new line</p>
         </div>
+      </div>
+      {detailsOpen && <ThreadDetails onClose={() => setDetailsOpen(false)} />}
       </div>
     </main>
   );
