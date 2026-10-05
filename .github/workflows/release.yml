@@ -44,6 +44,7 @@ jobs:
           if (!$env:TAURI_SIGNING_PRIVATE_KEY) { throw 'Configure the TAURI_SIGNING_PRIVATE_KEY repository secret before releasing.' }
       - run: npm run check
       - run: npm run test:updates
+      - run: npm run test:activity
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked

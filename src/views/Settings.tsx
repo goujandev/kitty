@@ -231,8 +231,8 @@ function AppearanceSettings(): React.ReactElement {
           <div className="settings__label">
             <span className="settings__name">Window background</span>
             <span className="settings__blurb">
-              Shown behind the composer when a conversation is empty, and out of
-              the way once there is something to read.
+              Shown on the welcome screen. Hidden as soon as you send a prompt
+              so the conversation stays easy to read.
             </span>
           </div>
 

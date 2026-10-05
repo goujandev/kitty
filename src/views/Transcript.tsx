@@ -1,4 +1,5 @@
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { groupActivity, formatElapsed, type DisplayBlock, type Activity, type TurnTiming } from "./activity";
 
 import { toolMeta, type Block, type HarnessId, type ToolStatus } from "../ipc/bindings";
 import { Markdown, openLinksExternally } from "./Markdown";
@@ -25,10 +26,13 @@ const OVERSCAN = 6;
 const STICK_THRESHOLD = 32;
 
 export function Transcript({
-  blocks,
+  blocks: rawBlocks,
   busy,
   harness,
   agentName,
+  timings,
+  status,
+  waiting,
 }: {
   blocks: Block[];
   busy: boolean;
@@ -36,7 +40,11 @@ export function Transcript({
   harness: HarnessId | null;
   /** What to call it. The model and its effort, not the harness. */
   agentName: string;
+  timings: Record<number, TurnTiming>;
+  status: string | null;
+  waiting: boolean;
 }): React.ReactElement {
+  const blocks = useMemo(() => groupActivity(rawBlocks, busy, timings), [rawBlocks, busy, timings]);
   // While a turn runs, the last agent block is the one being written to. It
   // stays plain text until it finishes; see Markdown.tsx for why.
   const streamingSeq = useMemo(() => {
@@ -209,6 +217,8 @@ export function Transcript({
               signed={signed.has(block.seq) && block.seq !== streamingSeq}
               harness={harness}
               agentName={agentName}
+              status={status}
+              waiting={waiting}
               onMeasure={measure}
             />
           ))}
@@ -231,9 +241,11 @@ const Row = memo(function Row({
   signed,
   harness,
   agentName,
+  status,
+  waiting,
   onMeasure,
 }: {
-  block: Block;
+  block: DisplayBlock;
   top: number;
   /** Still being written to, so render it as plain text. */
   streaming: boolean;
@@ -241,6 +253,8 @@ const Row = memo(function Row({
   signed: boolean;
   harness: HarnessId | null;
   agentName: string;
+  status: string | null;
+  waiting: boolean;
   onMeasure: (seq: number, height: number) => void;
 }): React.ReactElement {
   const node = useRef<HTMLDivElement>(null);
@@ -258,7 +272,7 @@ const Row = memo(function Row({
 
   return (
     <div className={`row msg msg--${block.kind}`} style={{ top }} ref={node} data-block-seq={block.seq}>
-      <Body block={block} streaming={streaming} />
+      {block.activity ? <ActivityGroup activity={block.activity} status={status} waiting={waiting} /> : <Body block={block} streaming={streaming} />}
       {signed && (
         // Who said it, stated after the fact rather than announced before it.
         // The answer is the thing worth reading; which model produced it is a
@@ -272,6 +286,32 @@ const Row = memo(function Row({
     </div>
   );
 });
+
+function ActivityGroup({ activity, status, waiting }: { activity: Activity; status: string | null; waiting: boolean }): React.ReactElement {
+  const [expanded, setExpanded] = useState(activity.active);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    setExpanded(activity.active);
+    if (!activity.active) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [activity.active]);
+  const tools = activity.blocks.filter(block => block.kind === "tool");
+  const current = [...tools].reverse().find(block => toolMeta(block).status === "running");
+  const outcome = activity.timing?.outcome;
+  const label = activity.active ? (waiting ? "Waiting for your approval" : "Working") : outcome === "failed" ? "Failed" : outcome === "stopped" ? "Stopped" : "Worked";
+  const elapsed = activity.active ? now - activity.startedAt : activity.timing?.endedAt !== undefined ? activity.timing.endedAt - activity.startedAt : null;
+  return <div className={`activity${activity.active ? " activity--active" : ""}`}>
+    <button className="activity__toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
+      {activity.active && !waiting ? <span className="spinner" aria-hidden="true" /> : <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>}
+      <span>{label}{elapsed !== null ? ` · ${formatElapsed(elapsed)}` : ""}</span>
+      {tools.length > 0 && <span className="activity__count">· {tools.length} {tools.length === 1 ? "action" : "actions"}</span>}
+    </button>
+    {activity.active && <div className="activity__status" role="status">{waiting ? "Resume by responding below." : status ?? current?.text ?? "Thinking…"}</div>}
+    {expanded && activity.blocks.length > 0 && <div className="activity__history">{activity.blocks.map(block => <div key={block.seq} className={`msg msg--${block.kind}`}><Body block={block} streaming={activity.active && block.kind !== "tool"} /></div>)}</div>}
+  </div>;
+}
 
 /** Copies a reply. The webview is a secure context, so this needs no host. */
 function Copy({ text }: { text: string }): React.ReactElement {

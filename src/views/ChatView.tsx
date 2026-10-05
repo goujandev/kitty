@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { formatElapsed } from "./activity";
 import {
   agentName,
   cancel,
@@ -34,7 +35,7 @@ export function ChatView({ onOpenSettings, onNewThread }: { onOpenSettings: () =
   const harness = currentHarness();
   const { effort } = currentModel();
   // Nothing said yet, whether that is a fresh conversation or none at all.
-  const blank = chat.blocks.length === 0;
+  const blank = chat.blocks.length === 0 && !chat.busy;
   /** A conversation is open or chosen, so the box is usable. */
   const live = chat.activeId !== null || chat.draft !== null;
   // Said once, in the box you would try to type into. A separate line above
@@ -65,21 +66,18 @@ export function ChatView({ onOpenSettings, onNewThread }: { onOpenSettings: () =
           <h1 className="chat__title">{title ?? "New thread"}</h1>
         </div>
         <span className="chat__head-gap" data-tauri-drag-region />
-        {chat.busy && <span className="chat__head-status"><span className="spinner" />Working</span>}
+        {chat.busy && <WorkingStatus startedAt={chat.startedAt ?? [...chat.blocks].reverse().find(block => block.kind === "user")?.createdAt ?? Date.now()} waiting={chat.approval !== null} />}
         <button type="button" className={`icon-button ${detailsOpen ? "is-active" : ""}`} aria-label="Thread details" aria-expanded={detailsOpen} title="Thread details" onClick={() => setDetailsOpen(value => !value)}><Icon name="panel" size={15} /></button>
         <button type="button" className="icon-button" aria-label="Agent settings" title="Agent settings" onClick={onOpenSettings}><Icon name="settings" size={15} /></button>
       </header>
 
       <div className="chat__body">
       <div className="canvas">
-        {/* The picture stays for the whole conversation, but steps back once
-            there is something to read: a photograph behind a wall of text is a
-            photograph nobody sees and text nobody can read. Mounted in both
-            states rather than swapped, so it dims across instead of
-            appearing. */}
-        {background && (
+        {/* Wallpaper belongs to the welcome screen. Hide it immediately on
+            send, including the wait before the first transcript block. */}
+        {background && blank && (
           <div
-            className={`wallpaper${blank ? "" : " wallpaper--behind"}`}
+            className="wallpaper"
             aria-hidden="true"
           >
             <div
@@ -117,6 +115,9 @@ export function ChatView({ onOpenSettings, onNewThread }: { onOpenSettings: () =
             busy={chat.busy}
             harness={harness}
             agentName={attribution}
+            timings={chat.timings}
+            status={chat.status}
+            waiting={chat.approval !== null}
           />
         )}
 
@@ -156,6 +157,16 @@ export function ChatView({ onOpenSettings, onNewThread }: { onOpenSettings: () =
       </div>
     </main>
   );
+}
+
+function WorkingStatus({ startedAt, waiting }: { startedAt: number; waiting: boolean }): React.ReactElement {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [startedAt]);
+  return <span className="chat__head-status">{!waiting && <span className="spinner" aria-hidden="true" />}{waiting ? "Waiting for approval" : "Working"} · {formatElapsed(now - startedAt)}</span>;
 }
 
 /**

@@ -1,7 +1,7 @@
 {
   "name": "kitty",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,8 @@
     "start": "tauri dev",
     "bundle": "tauri build --bundles nsis",
     "check:contract": "node scripts/check-contract.mjs",
-    "test:updates": "node --test scripts/update-controller.test.mjs scripts/update-settings.test.mjs scripts/release.test.mjs"
+    "test:updates": "node --test scripts/update-controller.test.mjs scripts/update-settings.test.mjs scripts/release.test.mjs",
+    "test:activity": "node --test scripts/activity.test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "~2.11.0",

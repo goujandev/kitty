@@ -31,6 +31,19 @@ import {
 import * as ipc from "../ipc/commands";
 import { refresh as refreshProjects } from "./projectStore";
 import { readyHarnesses } from "./harnessStore";
+import type { TurnTiming } from "../views/activity";
+
+function readTimings(): Record<string, Record<number, TurnTiming>> {
+  try { return JSON.parse(localStorage.getItem("kitty.turnTimings") ?? "{}"); }
+  catch { return {}; }
+}
+const turnTimings = readTimings();
+const pendingStarts: Record<string, number> = {};
+const pendingEnds: Record<string, Pick<TurnTiming, "endedAt" | "outcome">> = {};
+
+function saveTimings(): void {
+  try { localStorage.setItem("kitty.turnTimings", JSON.stringify(turnTimings)); } catch { /* Storage may be unavailable. */ }
+}
 
 export type { ApprovalKind } from "../ipc/bindings";
 
@@ -57,6 +70,8 @@ export interface ChatState {
   blocks: Block[];
   /** A turn is in flight. */
   busy: boolean;
+  startedAt: number | null;
+  timings: Record<number, TurnTiming>;
   /** Short-lived progress text from the CLI. */
   status: string | null;
   /** Why the last turn stopped, when it was not a clean finish. */
@@ -125,6 +140,8 @@ const EMPTY: ChatState = {
   draft: null,
   blocks: [],
   busy: false,
+  startedAt: null,
+  timings: {},
   status: null,
   notice: null,
   usage: null,
@@ -386,6 +403,8 @@ export function newSession(): void {
     activeId: null,
     blocks: [],
     busy: false,
+    startedAt: null,
+    timings: {},
     status: null,
     notice: null,
     usage: null,
@@ -430,6 +449,8 @@ export async function openSession(sessionId: string): Promise<void> {
     draftModel: null,
     blocks: [],
     busy: sessionId in state.running,
+    startedAt: pendingStarts[sessionId] ?? null,
+    timings: turnTimings[sessionId] ?? {},
     status: null,
     notice: null,
     usage: null,
@@ -463,7 +484,8 @@ export async function send(text: string): Promise<void> {
   const trimmed = text.trimEnd();
   if (!trimmed) return;
 
-  set({ busy: true, notice: null, error: null, status: null });
+  const startedAt = Date.now();
+  set({ busy: true, startedAt, notice: null, error: null, status: null });
   try {
     // A draft becomes a real session here, on the first message and not
     // before.
@@ -479,7 +501,14 @@ export async function send(text: string): Promise<void> {
     if (state.project) {
       set({ running: { ...state.running, [sessionId]: state.project.id } });
     }
+    pendingStarts[sessionId] = startedAt;
+    delete pendingEnds[sessionId];
     const seq = await ipc.sendTurn(sessionId, trimmed);
+    const timings = turnTimings[sessionId] ?? {};
+    turnTimings[sessionId] = { ...timings, [seq]: { startedAt, ...timings[seq], ...pendingEnds[sessionId] } };
+    delete pendingEnds[sessionId];
+    saveTimings();
+    if (state.activeId === sessionId) set({ timings: turnTimings[sessionId] });
     // Show it immediately rather than waiting for a round trip.
     appendLocalBlock({
       seq,
@@ -495,7 +524,11 @@ export async function send(text: string): Promise<void> {
     if (state.project?.root === null) void refreshProjects();
   } catch (error) {
     // The turn never started, so nothing is working on our behalf.
-    if (state.activeId) markIdle(state.activeId);
+    if (state.activeId) {
+      delete pendingStarts[state.activeId];
+      delete pendingEnds[state.activeId];
+      markIdle(state.activeId);
+    }
     set({ busy: false, error: message(error) });
   }
 }
@@ -829,12 +862,30 @@ export async function listen(): Promise<() => void> {
     // conversation's: the rails show which conversations are working, and one
     // you are not looking at is exactly the case that needs saying.
     for (const event of batch.events) {
+      if (event.kind === "blockAppended" && event.blockKind === "user") {
+        const timings = turnTimings[batch.sessionId] ?? {};
+        turnTimings[batch.sessionId] = { ...timings, [event.seq]: { startedAt: pendingStarts[batch.sessionId] ?? Date.now() } };
+      }
       if (event.kind === "turnEnded" || event.kind === "failed") {
+        const timings = turnTimings[batch.sessionId] ?? {};
+        const seq = Math.max(-1, ...Object.keys(timings).map(Number).filter(seq => timings[seq]?.endedAt === undefined));
+        const ending: Pick<TurnTiming, "endedAt" | "outcome"> = {
+          endedAt: Date.now(),
+          outcome: event.kind === "failed" || event.stop.kind === "failed" ? "failed" : event.stop.kind === "endTurn" ? "worked" : "stopped",
+        };
+        if (seq >= 0) {
+          turnTimings[batch.sessionId] = { ...timings, [seq]: {
+            ...timings[seq]!, ...ending,
+          } };
+          saveTimings();
+        } else if (batch.sessionId in pendingStarts) pendingEnds[batch.sessionId] = ending;
+        delete pendingStarts[batch.sessionId];
         markIdle(batch.sessionId);
       }
     }
     // The transcript itself is only rebuilt for the one on screen.
     if (batch.sessionId !== state.activeId) return;
+    set({ timings: turnTimings[batch.sessionId] ?? {} });
     for (const event of batch.events) apply(event);
   });
 }
