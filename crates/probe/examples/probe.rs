@@ -67,7 +67,7 @@ fn main() {
                 );
             }
             pantheon_core::LoginState::Unknown { reason } => {
-                println!("  login     unknown: {reason}")
+                println!("  login     unknown: {reason}");
             }
         }
 
