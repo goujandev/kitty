@@ -13,3 +13,6 @@
 
 # Local screenshots from manual verification runs.
 /.screenshots
+
+# Local wallpaper copy for the browser preview (npm run dev).
+/preview-local

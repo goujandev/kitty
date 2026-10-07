@@ -599,3 +599,207 @@ fn opening_a_project_by_id_marks_it_opened() {
     assert_eq!(reopened.id, project.id);
     assert!(reopened.last_opened_at > project.last_opened_at);
 }
+
+#[test]
+fn adding_a_folder_again_selects_the_existing_project_however_it_is_spelled() {
+    let store = store();
+    let (first, created) = store
+        .add_project(std::path::Path::new(r"C:\Work\Kitty"))
+        .expect("first");
+    assert!(created);
+
+    for spelling in [
+        r"C:\Work\Kitty",
+        r"c:\work\kitty\",
+        "C:/Work/Kitty",
+        r"\\?\C:\Work\Kitty",
+    ] {
+        let (again, created) = store
+            .add_project(std::path::Path::new(spelling))
+            .expect("again");
+        assert!(!created, "{spelling} is the same folder");
+        assert_eq!(again.id, first.id, "{spelling} must not create a twin");
+    }
+    assert_eq!(store.list_projects().expect("list").len(), 1);
+
+    let (other, created) = store
+        .add_project(std::path::Path::new(r"C:\Work\Kitty-two"))
+        .expect("other");
+    assert!(created, "a different folder is a different project");
+    assert_ne!(other.id, first.id);
+}
+
+#[test]
+fn renaming_a_project_changes_only_its_name_in_kitty() {
+    let store = store();
+    let project = store
+        .open_project(std::path::Path::new(r"C:\code\kitty"))
+        .expect("project");
+
+    let renamed = store
+        .rename_project(&project.id, "  Kitty   desktop ")
+        .expect("rename");
+    assert_eq!(renamed.name, "Kitty desktop", "whitespace is tidied");
+    assert_eq!(
+        renamed.root.as_deref(),
+        Some(r"C:\code\kitty"),
+        "the folder is unchanged"
+    );
+
+    let refused = store.rename_project(&project.id, "   ");
+    assert!(
+        matches!(refused, Err(kitty_store::StoreError::Invalid { .. })),
+        "an empty name is refused"
+    );
+    assert_eq!(
+        store.list_projects().expect("list")[0].name,
+        "Kitty desktop"
+    );
+
+    // Opening the folder again keeps the name the user chose.
+    let reopened = store
+        .open_project(std::path::Path::new(r"C:\code\kitty"))
+        .expect("reopen");
+    assert_eq!(reopened.name, "Kitty desktop");
+    assert!(store.rename_project("missing", "Name").is_err());
+}
+
+#[test]
+fn a_renamed_chat_keeps_its_title_and_an_empty_one_is_refused() {
+    let (store, session) = seeded();
+    store
+        .set_title_if_unset(&session, "explain the build")
+        .expect("auto title");
+
+    let renamed = store
+        .rename_session(&session, "Build notes")
+        .expect("rename");
+    assert_eq!(renamed.title.as_deref(), Some("Build notes"));
+
+    // The automatic title only fills a blank; it never replaces a chosen one.
+    store
+        .set_title_if_unset(&session, "something else")
+        .expect("ignored");
+    assert_eq!(
+        store.session(&session).expect("session").title.as_deref(),
+        Some("Build notes")
+    );
+
+    assert!(matches!(
+        store.rename_session(&session, " \n\t "),
+        Err(kitty_store::StoreError::Invalid { .. })
+    ));
+    assert_eq!(
+        store.session(&session).expect("session").title.as_deref(),
+        Some("Build notes")
+    );
+}
+
+#[test]
+fn archiving_a_chat_keeps_its_history_and_provider_session() {
+    let (store, session) = seeded();
+    store
+        .append_block(&session, BlockKind::User, "hello")
+        .expect("block");
+    store
+        .set_provider_session(&session, "thread-1")
+        .expect("provider");
+
+    let archived = store.set_session_archived(&session, true).expect("archive");
+    assert!(archived.archived_at.is_some());
+    assert_eq!(archived.provider_session.as_deref(), Some("thread-1"));
+    assert_eq!(store.blocks(&session).expect("blocks").len(), 1);
+    assert_eq!(
+        store
+            .list_sessions(&archived.project_id)
+            .expect("list")
+            .len(),
+        1,
+        "archived chats are still listed, marked as archived"
+    );
+
+    let restored = store
+        .set_session_archived(&session, false)
+        .expect("restore");
+    assert_eq!(restored.archived_at, None);
+    assert_eq!(restored.provider_session.as_deref(), Some("thread-1"));
+}
+
+#[test]
+fn automatic_titles_are_short_readable_sentences() {
+    use kitty_store::derive_title;
+
+    assert_eq!(derive_title("  explain the build  "), "explain the build");
+    assert_eq!(
+        derive_title("# Fix   the\theading\n\nmore detail"),
+        "Fix the heading"
+    );
+    assert_eq!(
+        derive_title("```\nlet x = 1;\n```\nWhy does this fail?"),
+        "Why does this fail?"
+    );
+    let long = derive_title(
+        "Please refactor the session engine so that cancellation and restart share one code path everywhere",
+    );
+    assert!(long.ends_with('…'), "{long}");
+    assert!(long.chars().count() <= 61, "{long}");
+    assert!(!long.contains("  "));
+}
+
+#[test]
+fn deleting_a_project_leaves_its_folder_on_disk() {
+    let dir = tempfile::tempdir().expect("dir");
+    std::fs::write(dir.path().join("README.md"), "keep me").expect("file");
+    let store = store();
+    let project = store.open_project(dir.path()).expect("project");
+    let session = store
+        .create_session(&project.id, "codex", None)
+        .expect("session");
+    store
+        .append_block(&session.id, BlockKind::User, "hello")
+        .expect("block");
+
+    store.delete_project(&project.id).expect("delete");
+
+    assert_eq!(store.list_projects().expect("list").len(), 0);
+    assert!(
+        store.session(&session.id).is_err(),
+        "its chats are gone from Kitty"
+    );
+    assert!(dir.path().is_dir(), "the folder stays");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("README.md")).expect("read"),
+        "keep me"
+    );
+}
+
+#[test]
+fn an_agent_title_never_replaces_one_the_user_chose() {
+    let (store, session) = seeded();
+    store
+        .set_title_if_unset(&session, "hey we need to redesign the entire UI")
+        .expect("first line");
+    let first = store
+        .session(&session)
+        .expect("session")
+        .title
+        .expect("title");
+
+    assert!(store
+        .replace_title_if(&session, &first, "Redesign UI")
+        .expect("replace"));
+    assert_eq!(
+        store.session(&session).expect("session").title.as_deref(),
+        Some("Redesign UI")
+    );
+
+    // Renamed by hand before a late answer arrives: the answer is dropped.
+    store.rename_session(&session, "My name").expect("rename");
+    assert!(!store
+        .replace_title_if(&session, &first, "Something else")
+        .expect("ignored"));
+    assert_eq!(
+        store.session(&session).expect("session").title.as_deref(),
+        Some("My name")
+    );
+}

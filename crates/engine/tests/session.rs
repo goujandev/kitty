@@ -75,6 +75,229 @@ const INIT: &str =
     r#"{"type":"system","subtype":"init","session_id":"fake-1","model":"fake-model"}"#;
 const RESULT: &str = r#"{"type":"result","stop_reason":"end_turn","is_error":false,"usage":{"input_tokens":1,"output_tokens":2}}"#;
 
+#[test]
+fn dropping_a_busy_session_ends_its_turn_once() {
+    // Changing model, restarting context and stopping a conversation all drop
+    // the engine. The window must still learn that the turn is over.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (session, events) = start_with(dir.path(), &[INIT], true);
+    assert!(session.send("start waiting"));
+    assert!(matches!(
+        events.recv_timeout(Duration::from_secs(5)),
+        Ok(SessionEvent::Started { .. })
+    ));
+    assert!(session.is_alive());
+    drop(session);
+    let ended: Vec<_> = drain(&events).into_iter().filter(is_end).collect();
+    assert_eq!(
+        ended,
+        vec![SessionEvent::TurnEnded {
+            stop: StopReason::Interrupted
+        }]
+    );
+}
+
+#[test]
+fn a_direct_claude_session_launches_with_only_the_users_choices() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let binary = fake_cli(dir.path(), &[INIT, RESULT], false);
+    std::fs::write(
+        &binary,
+        "@echo off\r\necho %*> \"%~dp0args.txt\"\r\ntype \"%~dp0frames.jsonl\"\r\n",
+    )
+    .expect("write recording CLI");
+    let mut spec = SessionSpec::new(HarnessId::Claude, binary, dir.path());
+    spec.resume = Some("saved-session".into());
+    spec.model = Some("chosen-model".into());
+    spec.effort = Some("medium".into());
+    let (_session, events) = Session::start(&spec).expect("start");
+    drain(&events);
+    let args = std::fs::read_to_string(dir.path().join("args.txt")).expect("recorded args");
+    for expected in [
+        "--resume saved-session",
+        "--model chosen-model",
+        "--effort medium",
+        "--permission-prompt-tool stdio",
+    ] {
+        assert!(args.contains(expected), "missing {expected} in {args}");
+    }
+    // A direct conversation keeps the CLI's own tools and system prompt.
+    for absent in ["--tools", "--strict-mcp-config", "--system-prompt"] {
+        assert!(!args.contains(absent), "unexpected {absent} in {args}");
+    }
+}
+/// A stand-in for `codex app-server`: answers the handshake, records what it
+/// was sent, and replies to one turn.
+fn fake_codex(dir: &Path) -> PathBuf {
+    let write = |name: &str, lines: &[&str]| {
+        std::fs::write(dir.join(name), lines.join("\n") + "\n").expect("write frames");
+    };
+    write("init.jsonl", &[r#"{"id":1,"result":{}}"#]);
+    write(
+        "thread.jsonl",
+        &[r#"{"id":2,"result":{"thread":{"id":"thread-1","model":"fake-model"}}}"#],
+    );
+    write(
+        "reply.jsonl",
+        &[
+            r#"{"method":"turn/started","params":{"turn":{"id":"turn-1"}}}"#,
+            r#"{"method":"item/agentMessage/delta","params":{"delta":"Done."}}"#,
+            r#"{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"m","text":"Done."}}}"#,
+            r#"{"method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}"#,
+        ],
+    );
+    // PowerShell rather than batch: `set /p` on a pipe can swallow two frames
+    // written together, and Kitty sends `initialized` and `thread/start` so.
+    std::fs::write(
+        dir.join("codex.ps1"),
+        concat!(
+            "$in = [Console]::In\r\n",
+            "function Reply($name) { Get-Content -LiteralPath (Join-Path $PSScriptRoot $name) | ForEach-Object { [Console]::Out.WriteLine($_) }; [Console]::Out.Flush() }\r\n",
+            "$null = $in.ReadLine(); Reply 'init.jsonl'\r\n",
+            "$null = $in.ReadLine()\r\n",
+            "[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'thread.txt'), $in.ReadLine()); Reply 'thread.jsonl'\r\n",
+            "[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'turn.txt'), $in.ReadLine()); Reply 'reply.jsonl'\r\n",
+        ),
+    )
+    .expect("write fake app-server");
+    let script = dir.join("codex.cmd");
+    std::fs::write(
+        &script,
+        "@echo off\r\npowershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%~dp0codex.ps1\"\r\n",
+    )
+    .expect("write script");
+    script
+}
+
+#[test]
+fn a_direct_codex_turn_carries_only_the_users_message() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let binary = fake_codex(dir.path());
+    let (session, events) =
+        Session::start(&SessionSpec::new(HarnessId::Codex, binary, dir.path())).expect("start");
+    // Sent during the handshake: held until the thread opens, then delivered.
+    assert!(session.send("Fix the heading"));
+    let seen = drain(&events);
+
+    assert!(seen.iter().any(|event| matches!(
+        event,
+        SessionEvent::Started { provider_session: Some(id), .. } if id == "thread-1"
+    )));
+    assert!(seen
+        .iter()
+        .any(|event| matches!(event, SessionEvent::MessageDelta { text } if text == "Done.")));
+    assert_eq!(
+        seen.iter()
+            .filter(|event| is_end(event))
+            .collect::<Vec<_>>(),
+        vec![&SessionEvent::TurnEnded {
+            stop: StopReason::EndTurn
+        }]
+    );
+
+    let read = |name: &str| -> serde_json::Value {
+        let line = std::fs::read_to_string(dir.path().join(name)).expect("recorded frame");
+        serde_json::from_str(line.trim()).expect("a frame is one JSON line")
+    };
+    let thread = read("thread.txt");
+    assert_eq!(thread["method"], "thread/start");
+    assert!(thread["params"].get("developerInstructions").is_none());
+    let turn = read("turn.txt");
+    assert_eq!(turn["method"], "turn/start");
+    assert_eq!(turn["params"]["threadId"], "thread-1");
+    assert_eq!(
+        turn["params"]["input"],
+        serde_json::json!([{ "type": "text", "text": "Fix the heading" }])
+    );
+}
+
+#[test]
+fn automatic_permission_modes_only_prompt_for_uncovered_actions() {
+    use kitty_engine::ApprovalMode;
+    for (mode, tool, should_ask) in [
+        (ApprovalMode::Auto, "Write", false),
+        (ApprovalMode::Auto, "Bash", false),
+        (ApprovalMode::Edits, "Write", false),
+        (ApprovalMode::Edits, "Bash", true),
+        (ApprovalMode::Edits, "WebFetch", true),
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ask = format!(
+            r#"{{"type":"control_request","request_id":"permission","request":{{"subtype":"can_use_tool","tool_name":"{tool}","input":{{}}}}}}"#
+        );
+        let binary = fake_cli(dir.path(), &[INIT, &ask], true);
+        let mut spec = SessionSpec::new(HarnessId::Claude, binary, dir.path());
+        spec.approval_mode = mode;
+        let (session, events) = Session::start(&spec).expect("start");
+        assert!(session.send("permission test"));
+        let mut prompted = false;
+        let mut resolved = false;
+        while let Ok(event) = events.recv_timeout(Duration::from_secs(5)) {
+            match event {
+                SessionEvent::ApprovalRequested { id, .. } => {
+                    prompted = true;
+                    assert!(session.respond(&id, true));
+                }
+                SessionEvent::ApprovalResolved { outcome, .. } => {
+                    assert_eq!(outcome, kitty_core::ApprovalOutcome::Allowed);
+                    resolved = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(resolved, "{mode:?} did not settle {tool}");
+        assert_eq!(prompted, should_ask, "{mode:?} / {tool}");
+    }
+}
+
+#[test]
+fn changing_permission_mode_settles_pending_actions_it_covers() {
+    use kitty_engine::ApprovalMode;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let edit = r#"{"type":"control_request","request_id":"edit","request":{"subtype":"can_use_tool","tool_name":"Write","input":{}}}"#;
+    let command = r#"{"type":"control_request","request_id":"command","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{}}}"#;
+    // Hold the process open while both outstanding requests are classified.
+    let binary = fake_cli(dir.path(), &[INIT, edit, command], true);
+    std::fs::write(&binary, "@echo off\r\nset /p turn=\r\ntype \"%~dp0frames.jsonl\"\r\nset /p edit=\r\nset /p command=\r\n").expect("write waiting CLI");
+    let (session, events) =
+        Session::start(&SessionSpec::new(HarnessId::Claude, binary, dir.path())).expect("start");
+    assert!(session.send("permission test"));
+    let mut asked = 0;
+    while asked < 2 {
+        if matches!(
+            events
+                .recv_timeout(Duration::from_secs(5))
+                .expect("request"),
+            SessionEvent::ApprovalRequested { .. }
+        ) {
+            asked += 1;
+        }
+    }
+    assert!(session.set_approval_mode(ApprovalMode::Edits));
+    loop {
+        if let SessionEvent::ApprovalResolved { id, outcome } = events
+            .recv_timeout(Duration::from_secs(5))
+            .expect("edit resolution")
+        {
+            assert_eq!(id, "edit");
+            assert_eq!(outcome, kitty_core::ApprovalOutcome::Allowed);
+            break;
+        }
+    }
+    assert!(session.set_approval_mode(ApprovalMode::Auto));
+    loop {
+        if let SessionEvent::ApprovalResolved { id, outcome } = events
+            .recv_timeout(Duration::from_secs(5))
+            .expect("command resolution")
+        {
+            assert_eq!(id, "command");
+            assert_eq!(outcome, kitty_core::ApprovalOutcome::Allowed);
+            break;
+        }
+    }
+}
+
 fn delta(text: &str) -> String {
     format!(
         r#"{{"type":"stream_event","event":{{"type":"content_block_delta","index":0,"delta":{{"type":"text_delta","text":"{text}"}}}}}}"#
@@ -267,4 +490,62 @@ fn a_missing_binary_is_an_error_rather_than_a_hang() {
         dir.path(),
     );
     assert!(Session::start(&spec).is_err());
+}
+
+#[test]
+fn exited_engine_is_not_reported_as_alive() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (session, events) = start(dir.path(), &[INIT, RESULT]);
+    let _ = drain(&events);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while session.is_alive() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!session.is_alive(), "exited engine must be replaceable");
+}
+
+#[test]
+fn silent_cli_times_out_requested_turn_and_becomes_replaceable() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let binary = dir.path().join("silent.cmd");
+    std::fs::write(&binary, "@echo off\r\nset /p turn=\r\nset /p waiting=\r\n")
+        .expect("write silent CLI");
+    let mut spec = SessionSpec::new(HarnessId::Claude, binary, dir.path());
+    spec.turn_start_timeout = Duration::from_millis(150);
+    let (session, events) = Session::start(&spec).expect("start");
+    assert!(session.send("do not leave this waiting forever"));
+    let seen = drain(&events);
+    assert!(seen.iter().any(|event| matches!(
+        event,
+        SessionEvent::TurnEnded {
+            stop: StopReason::Failed { .. }
+        }
+    )));
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while session.is_alive() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!session.is_alive());
+}
+
+#[test]
+fn continuous_unknown_frames_do_not_postpone_turn_start_timeout() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let binary = dir.path().join("noisy.cmd");
+    std::fs::write(
+        &binary,
+        "@echo off\r\nset /p turn=\r\nfor /l %%i in (1,1,1000000) do @echo waiting\r\n",
+    )
+    .expect("write noisy CLI");
+    let mut spec = SessionSpec::new(HarnessId::Claude, binary, dir.path());
+    spec.turn_start_timeout = Duration::from_millis(150);
+    let (session, events) = Session::start(&spec).expect("start");
+    assert!(session.send("start deadline must remain bounded"));
+    let seen = drain(&events);
+    assert!(seen.iter().any(|event| matches!(
+        event,
+        SessionEvent::TurnEnded {
+            stop: StopReason::Failed { .. }
+        }
+    )));
 }

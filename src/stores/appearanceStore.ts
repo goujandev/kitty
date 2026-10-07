@@ -32,7 +32,7 @@ let state: Appearance = {
   zoom: 1,
   // Matched to the stylesheet, so the rails do not jump when the saved widths
   // arrive a moment later.
-  rails: { projects: 198, chats: 248 },
+  rails: { projects: 256, chats: 260 },
   error: null,
 };
 const listeners = new Set<() => void>();
@@ -75,7 +75,8 @@ function paint(): void {
     state.theme === "system" ? (dark.matches ? "dark" : "light") : state.theme;
   document.documentElement.dataset.theme = resolved;
   // Tells the browser which way to render scrollbars and form controls.
-  document.documentElement.style.colorScheme = resolved;
+  document.documentElement.style.colorScheme =
+    resolved === "light" || resolved === "solarized-light" ? "light" : "dark";
 }
 
 // Following the OS means following it as it changes, not only at startup.
@@ -105,10 +106,29 @@ export async function loadAppearance(): Promise<void> {
     ipc.zoom().catch(() => 1),
     ipc.railWidths().catch(() => state.rails),
   ]);
-  set({ theme: saved, background: image, zoom: factor, rails });
+  let widths = rails;
+  let nextTheme = saved;
+  let nextZoom = factor;
+  try {
+    // Adopt the user's requested reference presentation once. Subsequent
+    // appearance and zoom changes remain ordinary saved preferences.
+    if (localStorage.getItem("kitty:t3-reference-presentation") !== "true") {
+      widths = {
+        projects: 256,
+        chats: rails.chats === 248 ? 260 : rails.chats,
+      };
+      nextTheme = "dark";
+      nextZoom = 1;
+      await ipc.setRailWidths(widths);
+      await ipc.setTheme(nextTheme);
+      await ipc.setZoom(nextZoom);
+      localStorage.setItem("kitty:t3-reference-presentation", "true");
+    }
+  } catch { /* Keep the loaded widths if this preference cannot be saved. */ }
+  set({ theme: nextTheme, background: image, zoom: nextZoom, rails: widths });
   paint();
   // Quiet at startup: an unzoomed window is a working window.
-  void applyZoom(factor).catch(() => undefined);
+  void applyZoom(nextZoom).catch(() => undefined);
 }
 
 /** Remembers a rail's width. Called when a drag ends, not during one. */

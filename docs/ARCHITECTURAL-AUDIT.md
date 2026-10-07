@@ -522,6 +522,7 @@ Checks re-run on the working tree: `cargo clippy --workspace --all-targets -- -D
 - **Severity:** Low. **Likelihood:** Medium on Windows.
 - **Evidence:** [`crates/store/src/lib.rs`](../crates/store/src/lib.rs), `open_project`, lines 189–199: the upsert key is `root.to_string_lossy()` with no canonicalisation. `C:\Repo`, `c:\repo`, and `C:\Repo\` become three projects with separate conversation lists.
 - **Recommendation:** Canonicalise in `open_project` before the upsert, with a one-off migration that merges existing duplicates by canonical path.
+- **Status (2026-10-06, T-025):** Partly addressed. `Store::add_project` now matches folders by a key that ignores case, slash direction, trailing separators and the `\\?\` prefix. Adding the same folder again selects the existing project. Duplicates created before this change are not merged.
 
 ### S07. Finished replies are re-parsed every time they scroll into view
 

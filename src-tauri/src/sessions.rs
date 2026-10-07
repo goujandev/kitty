@@ -161,6 +161,12 @@ impl<S: Sink> Transcript<S> {
             } => {
                 if let Some(provider) = &provider_session {
                     let _ = self.store.set_provider_session(&self.session_id, provider);
+                    let _ = self.store.set_setting(
+                        "session",
+                        &self.session_id,
+                        "fresh_context",
+                        "false",
+                    );
                 }
                 // Deliberately not persisted. This is the name the CLI
                 // resolved to, and the stored model is what the user asked
@@ -250,12 +256,39 @@ impl<S: Sink> Transcript<S> {
                 message,
                 ..
             } => {
+                self.persist_error(&message);
                 self.pending.push(TranscriptEvent::Failed {
                     error_kind,
                     message,
                 });
                 self.flush_events();
             }
+        }
+    }
+
+    fn persist_error(&mut self, message: &str) {
+        // Errors must survive navigation and restart, rather than
+        // existing only in a transient status event.
+        self.close_all();
+        if let Ok(seq) = self
+            .store
+            .append_block(&self.session_id, BlockKind::Tool, "Agent error")
+        {
+            let _ = self.store.set_block_meta(
+                &self.session_id,
+                seq,
+                &tool_meta(ToolStatus::Failed, Some(message)),
+            );
+            self.pending.push(TranscriptEvent::BlockAppended {
+                seq,
+                block_kind: BlockKind::Tool,
+                text: "Agent error".into(),
+            });
+            self.pending.push(TranscriptEvent::ToolStatusChanged {
+                seq,
+                status: ToolStatus::Failed,
+                detail: Some(message.to_owned()),
+            });
         }
     }
 
@@ -628,6 +661,56 @@ mod tests {
     /// The bug this was written for: Claude opens a thinking block with an
     /// empty chunk. Creating a row for it and deleting it again handed its
     /// sequence to the answer, which the window then drew as reasoning.
+    #[test]
+    fn agent_errors_survive_transcript_reload() {
+        let (recorder, store, session) = run(vec![SessionEvent::Error {
+            error_kind: kitty_core::ErrorKind::Protocol,
+            message: "the app-server rejected a request".into(),
+            retryable: false,
+        }]);
+        let blocks = store.blocks(&session).expect("blocks");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].kind, BlockKind::Tool);
+        assert!(blocks[0]
+            .meta
+            .as_deref()
+            .unwrap_or_default()
+            .contains("the app-server rejected a request"));
+        assert!(recorder
+            .events()
+            .iter()
+            .any(|event| matches!(event, TranscriptEvent::Failed { .. })));
+    }
+
+    #[test]
+    fn recovered_context_saves_new_provider_identity_without_error_rows() {
+        let (recorder, store, session) = run(vec![
+            SessionEvent::Started {
+                provider_session: Some("replacement-thread".into()),
+                model: Some("chosen-model".into()),
+            },
+            SessionEvent::Status {
+                text: "Agent ready with fresh context. Your saved chat history is kept.".into(),
+            },
+        ]);
+        assert_eq!(
+            store
+                .session(&session)
+                .expect("session")
+                .provider_session
+                .as_deref(),
+            Some("replacement-thread")
+        );
+        assert_eq!(store.blocks(&session).expect("blocks").len(), 0);
+        let events = recorder.events();
+        assert!(events
+            .iter()
+            .any(|event| matches!(event, TranscriptEvent::SessionReady { .. })));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, TranscriptEvent::Failed { .. })));
+    }
+
     #[test]
     fn an_empty_reasoning_chunk_does_not_claim_a_sequence() {
         let (recorder, store, session) = run(vec![

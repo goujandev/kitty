@@ -207,6 +207,123 @@ UPDATE projects SET sort_order = created_at;
 UPDATE sessions SET sort_order = created_at;
 ",
     },
+    Migration {
+        version: 7,
+        name: "retire_orchestration",
+        sql: r"
+-- Kitty talks to one agent per conversation again; the agent-team prototype is
+-- gone (D-024). It kept its state in settings and in conversations of its own,
+-- and both are retired here so nothing it left behind reaches the app.
+--
+-- Foreign keys are off while migrations run, so every child row is deleted by
+-- hand rather than trusted to a cascade.
+
+-- Conversations that only existed to coordinate or carry out delegated work:
+-- the team lead, and every worker the team registry recorded.
+CREATE TEMP TABLE retired_sessions (id TEXT PRIMARY KEY NOT NULL);
+
+INSERT OR IGNORE INTO retired_sessions
+    SELECT scope_id FROM settings
+     WHERE scope = 'session' AND key = 'role' AND value = 'lead';
+
+INSERT OR IGNORE INTO retired_sessions
+    SELECT id FROM (
+        SELECT json_extract(task.value, '$.sessionId') AS id
+          FROM settings,
+               json_each(CASE WHEN json_valid(settings.value)
+                              THEN settings.value ELSE '[]' END) AS task
+         WHERE settings.scope = 'orchestration' AND settings.scope_id = ''
+           AND settings.key = 'tasks' AND task.type = 'object'
+    ) WHERE id IS NOT NULL;
+
+INSERT OR IGNORE INTO retired_sessions
+    SELECT scope_id FROM settings WHERE scope = 'orchestration_task';
+
+DELETE FROM blocks_fts WHERE session_id IN (SELECT id FROM retired_sessions);
+DELETE FROM blocks WHERE session_id IN (SELECT id FROM retired_sessions);
+DELETE FROM turns WHERE session_id IN (SELECT id FROM retired_sessions);
+DELETE FROM settings
+ WHERE scope IN ('session', 'orchestration', 'ui')
+   AND scope_id IN (SELECT id FROM retired_sessions);
+DELETE FROM sessions WHERE id IN (SELECT id FROM retired_sessions);
+
+-- The conversations the user spoke to stay, transcript and all. Their saved
+-- provider context, though, was told it coordinated a team and must never do
+-- the work itself. Forgetting it starts fresh context on the next message, as
+-- manual recovery does; Kitty's history is kept and nothing is replayed.
+UPDATE sessions SET provider_session = NULL
+ WHERE id IN (SELECT scope_id FROM settings
+               WHERE scope = 'session' AND key = 'role' AND value = 'boss')
+    OR id IN (SELECT scope_id FROM settings
+               WHERE scope = 'orchestration' AND scope_id <> '');
+
+-- Notices addressed to the coordinator, and its delegation failures.
+DELETE FROM blocks
+ WHERE kind = 'tool'
+   AND text IN ('Team reports received', 'Team update received',
+                'Worker budget reached', 'Worker needs reassessment');
+DELETE FROM blocks
+ WHERE kind = 'assistant'
+   AND (text LIKE 'Kitty could not delegate:%'
+        OR text LIKE 'Kitty could not create %'
+        OR text LIKE 'Kitty could not finish cancellation:%');
+
+-- Delegation and assignment blocks were hidden control text at the end of a
+-- reply. Keep the prose before them; a reply that was nothing else goes.
+CREATE TEMP TABLE trimmed_blocks AS
+    SELECT session_id, seq,
+           rtrim(substr(text, 1, min(
+               CASE WHEN instr(text, '```kitty-delegate') > 0
+                    THEN instr(text, '```kitty-delegate') ELSE length(text) + 1 END,
+               CASE WHEN instr(text, '```kitty-assignment') > 0
+                    THEN instr(text, '```kitty-assignment') ELSE length(text) + 1 END
+           ) - 1), ' ' || char(9, 10, 13)) AS text
+      FROM blocks
+     WHERE kind = 'assistant'
+       AND (instr(text, '```kitty-delegate') > 0
+            OR instr(text, '```kitty-assignment') > 0);
+
+UPDATE blocks
+   SET text = (SELECT t.text FROM trimmed_blocks t
+                WHERE t.session_id = blocks.session_id AND t.seq = blocks.seq)
+ WHERE EXISTS (SELECT 1 FROM trimmed_blocks t
+                WHERE t.session_id = blocks.session_id AND t.seq = blocks.seq);
+UPDATE blocks_fts
+   SET text = (SELECT t.text FROM trimmed_blocks t
+                WHERE t.session_id = blocks_fts.session_id AND t.seq = blocks_fts.seq)
+ WHERE EXISTS (SELECT 1 FROM trimmed_blocks t
+                WHERE t.session_id = blocks_fts.session_id AND t.seq = blocks_fts.seq);
+DELETE FROM blocks
+ WHERE kind = 'assistant' AND text = ''
+   AND EXISTS (SELECT 1 FROM trimmed_blocks t
+                WHERE t.session_id = blocks.session_id AND t.seq = blocks.seq);
+
+-- Search rows for anything deleted above.
+DELETE FROM blocks_fts
+ WHERE NOT EXISTS (SELECT 1 FROM blocks b
+                    WHERE b.session_id = blocks_fts.session_id
+                      AND b.seq = blocks_fts.seq);
+
+-- Settings that only the removed workflow read.
+DELETE FROM settings WHERE scope IN ('orchestration', 'orchestration_task');
+DELETE FROM settings WHERE scope = 'session' AND key IN ('role', 'runtime_model');
+DELETE FROM settings WHERE scope = 'project' AND key IN ('lead_session', 'parent_session');
+DELETE FROM settings WHERE scope = 'ui' AND key IN ('auto_hide_finished_tasks', 'task_hidden');
+
+DROP TABLE trimmed_blocks;
+DROP TABLE retired_sessions;
+",
+    },
+    Migration {
+        version: 8,
+        name: "archive_chats",
+        sql: r"
+-- A chat can be filed away without being deleted. NULL means it is in the
+-- list; a time means it was archived then. The provider's session id stays,
+-- so restoring one resumes it.
+ALTER TABLE sessions ADD COLUMN archived_at INTEGER;
+",
+    },
 ];
 
 /// Applies anything not yet recorded. Safe to call on every open.
@@ -302,6 +419,8 @@ mod tests {
             (4, 0xf898_216c_1d8a_28bc),
             (5, 0xc76e_dc4c_7eab_a7b4),
             (6, 0x927c_1f8b_f544_650e),
+            (7, 0x6c1a_d0ca_751f_851a),
+            (8, 0xffbc_26d3_0d68_5c5d),
         ];
 
         assert_eq!(
@@ -516,5 +635,145 @@ mod tests {
             applied,
             i64::try_from(MIGRATIONS.len()).expect("migration count")
         );
+    }
+
+    fn count(conn: &Connection, sql: &str) -> i64 {
+        conn.query_row(sql, [], |r| r.get(0)).expect("count")
+    }
+
+    /// A database the agent-team prototype wrote to opens as a plain chat app:
+    /// its coordinator and worker conversations are gone, the conversations the
+    /// user spoke to keep their history but not the poisoned provider context.
+    #[test]
+    #[allow(clippy::too_many_lines)] // One realistic database, seeded and checked whole.
+    fn orchestration_state_is_retired_and_direct_history_kept() {
+        let conn = Connection::open_in_memory().expect("open");
+        migrate_through(&conn, 6).expect("up to 6");
+        conn.execute_batch(
+            r#"INSERT INTO projects (id, root, name, created_at, last_opened_at)
+                 VALUES ('p', 'C:\code\app', 'app', 1, 1);
+             INSERT INTO sessions (id, project_id, harness, provider_session, title, created_at, updated_at)
+                 VALUES ('boss', 'p', 'codex', 'boss-thread', 'Boss', 1, 1),
+                        ('lead', 'p', 'codex', 'lead-thread', NULL, 1, 1),
+                        ('worker', 'p', 'codex', 'worker-thread', 'Edit', 1, 1),
+                        ('parent', 'p', 'claude', 'parent-session', 'Old parent', 1, 1),
+                        ('plain', 'p', 'claude', 'plain-session', 'Plain', 1, 1);
+             INSERT INTO blocks (session_id, seq, kind, text, created_at) VALUES
+                 ('boss', 0, 'user', 'Fix the heading', 1),
+                 ('boss', 1, 'assistant', 'On it.' || char(10) || '```kitty-assignment' || char(10) || '{}' || char(10) || '```', 1),
+                 ('lead', 0, 'user', 'Delegate this', 1),
+                 ('worker', 0, 'user', 'You are a worker', 1),
+                 ('parent', 0, 'user', 'Build it', 1),
+                 ('parent', 1, 'assistant', 'Assigning a builder.' || char(10) || '```kitty-delegate' || char(10) || '{}' || char(10) || '```', 1),
+                 ('parent', 2, 'assistant', '```kitty-delegate' || char(10) || '{}' || char(10) || '```', 1),
+                 ('parent', 3, 'tool', 'Team reports received', 1),
+                 ('parent', 4, 'assistant', 'Kitty could not delegate: bad block', 1),
+                 ('plain', 0, 'assistant', 'A normal reply', 1);
+             INSERT INTO blocks_fts (text, session_id, seq)
+                 SELECT text, session_id, seq FROM blocks;
+             INSERT INTO turns (session_id, seq, stop, ended_at) VALUES ('worker', 1, 'endTurn', 1);
+             INSERT INTO settings (scope, scope_id, key, value) VALUES
+                 ('session', 'boss', 'role', 'boss'),
+                 ('session', 'lead', 'role', 'lead'),
+                 ('session', 'worker', 'approval_mode', 'auto'),
+                 ('session', 'plain', 'approval_mode', 'ask'),
+                 ('session', 'plain', 'runtime_model', 'x'),
+                 ('orchestration', '', 'tasks', '[{"sessionId":"worker","status":"completed"},"stray"]'),
+                 ('orchestration', 'parent', 'batches', '2'),
+                 ('orchestration', 'lead', 'stopped', 'true'),
+                 ('project', 'p', 'lead_session', 'lead'),
+                 ('project', 'p', 'parent_session', 'boss'),
+                 ('ui', '', 'auto_hide_finished_tasks', 'true'),
+                 ('ui', 'worker', 'task_hidden', 'true'),
+                 ('ui', '', 'theme', 'nord');"#,
+        )
+        .expect("seed an orchestration-era database");
+
+        migrate(&conn).expect("retire orchestration");
+
+        let sessions: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT id, provider_session FROM sessions ORDER BY id")
+            .expect("prepare")
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("query")
+            .collect::<rusqlite::Result<_>>()
+            .expect("rows");
+        assert_eq!(
+            sessions,
+            vec![
+                ("boss".to_owned(), None),
+                ("parent".to_owned(), None),
+                ("plain".to_owned(), Some("plain-session".to_owned())),
+            ]
+        );
+        for table in ["blocks", "blocks_fts", "turns"] {
+            assert_eq!(
+                count(
+                    &conn,
+                    &format!("SELECT COUNT(*) FROM {table} WHERE session_id IN ('lead', 'worker')")
+                ),
+                0,
+                "{table} kept retired rows"
+            );
+        }
+        let texts: Vec<(String, i64, String)> = conn
+            .prepare("SELECT session_id, seq, text FROM blocks ORDER BY session_id, seq")
+            .expect("prepare")
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .expect("query")
+            .collect::<rusqlite::Result<_>>()
+            .expect("rows");
+        assert_eq!(
+            texts,
+            vec![
+                ("boss".to_owned(), 0, "Fix the heading".to_owned()),
+                ("boss".to_owned(), 1, "On it.".to_owned()),
+                ("parent".to_owned(), 0, "Build it".to_owned()),
+                ("parent".to_owned(), 1, "Assigning a builder.".to_owned()),
+                ("plain".to_owned(), 0, "A normal reply".to_owned()),
+            ]
+        );
+        // Search agrees with the transcript it indexes.
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT COUNT(*) FROM blocks_fts f WHERE NOT EXISTS (SELECT 1 FROM blocks b
+                  WHERE b.session_id = f.session_id AND b.seq = f.seq AND b.text = f.text)"
+            ),
+            0
+        );
+        let settings: Vec<(String, String, String)> = conn
+            .prepare("SELECT scope, scope_id, key FROM settings ORDER BY scope, scope_id, key")
+            .expect("prepare")
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .expect("query")
+            .collect::<rusqlite::Result<_>>()
+            .expect("rows");
+        assert_eq!(
+            settings,
+            vec![
+                (
+                    "session".to_owned(),
+                    "plain".to_owned(),
+                    "approval_mode".to_owned()
+                ),
+                ("ui".to_owned(), String::new(), "theme".to_owned()),
+            ]
+        );
+    }
+
+    /// Unreadable saved team state must not stop the app from opening.
+    #[test]
+    fn malformed_orchestration_state_does_not_block_startup() {
+        let conn = Connection::open_in_memory().expect("open");
+        migrate_through(&conn, 6).expect("up to 6");
+        conn.execute_batch(
+            "INSERT INTO settings (scope, scope_id, key, value) VALUES
+                 ('orchestration', '', 'tasks', 'not json at all'),
+                 ('orchestration_task', 'gone', 'task', '{');",
+        )
+        .expect("seed");
+        migrate(&conn).expect("malformed state is ignored");
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM settings"), 0);
     }
 }

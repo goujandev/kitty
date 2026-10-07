@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { groupActivity, formatElapsed, type DisplayBlock, type Activity, type TurnTiming } from "./activity";
+import { groupActivity, formatElapsed, savedContextNote, type DisplayBlock, type Activity, type TurnTiming } from "./activity";
 
 import { toolMeta, type Block, type HarnessId, type ToolStatus } from "../ipc/bindings";
 import { Markdown, openLinksExternally } from "./Markdown";
@@ -22,8 +22,8 @@ import { Mark } from "./Marks";
 const ESTIMATE = 76;
 /** Rows rendered beyond the viewport, so scrolling does not flash. */
 const OVERSCAN = 6;
-/** How close to the bottom still counts as "following the stream". */
-const STICK_THRESHOLD = 32;
+/** Allow fractional-pixel rounding without leaving a visible gap. */
+const STICK_THRESHOLD = 2;
 
 export function Transcript({
   blocks: rawBlocks,
@@ -129,10 +129,12 @@ export function Transcript({
   }, [blocks, offsets, scrollTop, viewport]);
 
   const onScroll = useCallback(() => {
-    if (!scroller) return;
-    stick.current =
-      scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <=
-      STICK_THRESHOLD;
+    if (!scroller || scroller.clientHeight === 0) return;
+    // Layout/virtual-row measurements also generate scroll events. They must
+    // not turn following off: only deliberate reader input does that.
+    if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= STICK_THRESHOLD) {
+      stick.current = true;
+    }
     setScrollTop(scroller.scrollTop);
   }, [scroller]);
 
@@ -158,6 +160,7 @@ export function Transcript({
     if (!column) return undefined;
 
     const check = () => {
+      if (column.clientWidth === 0) return;
       if (column.clientWidth === width.current) return;
       width.current = column.clientWidth;
       heights.current.clear();
@@ -178,11 +181,20 @@ export function Transcript({
   // Follow the stream, but only while the reader has not scrolled away.
   useLayoutEffect(() => {
     if (!scroller || !stick.current) return;
-    scroller.scrollTop = scroller.scrollHeight;
-    setScrollTop(scroller.scrollTop);
-  }, [scroller, blocks, total]);
+    const follow = () => {
+      if (!stick.current || scroller.clientHeight === 0) return;
+      scroller.scrollTop = scroller.scrollHeight;
+      setScrollTop(scroller.scrollTop);
+    };
+    follow();
+    // Finish after the browser settles resized/virtualized rows, checking
+    // reader intent again so a wheel gesture between frames wins.
+    const frame = requestAnimationFrame(follow);
+    return () => cancelAnimationFrame(frame);
+  }, [scroller, blocks, total, viewport, measured, busy, status, waiting]);
 
   const measure = useCallback((seq: number, height: number) => {
+    if (height === 0) return;
     if (heights.current.get(seq) === height) return;
     heights.current.set(seq, height);
     setMeasured((n) => n + 1);
@@ -197,6 +209,26 @@ export function Transcript({
       className={`transcript${blocks.length === 0 ? " transcript--empty" : ""}`}
       ref={setScroller}
       onScroll={onScroll}
+      style={{ overflowAnchor: "none" }}
+      tabIndex={0}
+      onWheel={event => {
+        const pane = event.currentTarget;
+        if (pane.scrollHeight - pane.clientHeight <= STICK_THRESHOLD) return;
+        if (event.deltaY < 0 || (event.deltaY > 0 && pane.scrollHeight - pane.scrollTop - pane.clientHeight > STICK_THRESHOLD)) stick.current = false;
+      }}
+      onTouchMove={event => { if (event.currentTarget.scrollHeight > event.currentTarget.clientHeight + STICK_THRESHOLD) stick.current = false; }}
+      onTouchEnd={event => { const pane = event.currentTarget; if (pane.scrollHeight - pane.scrollTop - pane.clientHeight <= STICK_THRESHOLD) stick.current = true; }}
+      onPointerDown={event => {
+        const pane = event.currentTarget;
+        if (event.target === pane && event.clientX >= pane.getBoundingClientRect().right - 18) stick.current = false;
+      }}
+      onKeyDown={event => {
+        if (event.target !== event.currentTarget) return;
+        const pane = event.currentTarget;
+        if (pane.scrollHeight - pane.clientHeight <= STICK_THRESHOLD) return;
+        if (["ArrowUp", "PageUp", "Home"].includes(event.key) || (event.key === " " && event.shiftKey)) stick.current = false;
+        else if (["ArrowDown", "PageDown", "End", " "].includes(event.key) && pane.scrollHeight - pane.scrollTop - pane.clientHeight > STICK_THRESHOLD) stick.current = false;
+      }}
     >
       {blocks.length === 0 ? (
         <p className="muted">
@@ -271,7 +303,7 @@ const Row = memo(function Row({
   }, [block.seq, onMeasure]);
 
   return (
-    <div className={`row msg msg--${block.kind}`} style={{ top }} ref={node} data-block-seq={block.seq}>
+    <div className={`row msg msg--${block.kind}${block.activity ? " msg--activity" : ""}`} style={{ top }} ref={node} data-block-seq={block.seq}>
       {block.activity ? <ActivityGroup activity={block.activity} status={status} waiting={waiting} /> : <Body block={block} streaming={streaming} />}
       {signed && (
         // Who said it, stated after the fact rather than announced before it.
@@ -304,9 +336,8 @@ function ActivityGroup({ activity, status, waiting }: { activity: Activity; stat
   const elapsed = activity.active ? now - activity.startedAt : activity.timing?.endedAt !== undefined ? activity.timing.endedAt - activity.startedAt : null;
   return <div className={`activity${activity.active ? " activity--active" : ""}`}>
     <button className="activity__toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
-      {activity.active && !waiting ? <span className="spinner" aria-hidden="true" /> : <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>}
-      <span>{label}{elapsed !== null ? ` · ${formatElapsed(elapsed)}` : ""}</span>
-      {tools.length > 0 && <span className="activity__count">· {tools.length} {tools.length === 1 ? "action" : "actions"}</span>}
+      {activity.active && !waiting && <span className="spinner" aria-hidden="true" />}
+      <span>{label}{elapsed !== null ? `${activity.active ? " · " : " for "}${formatElapsed(elapsed)}` : ""}</span>
     </button>
     {activity.active && <div className="activity__status" role="status">{waiting ? "Resume by responding below." : status ?? current?.text ?? "Thinking…"}</div>}
     {expanded && activity.blocks.length > 0 && <div className="activity__history">{activity.blocks.map(block => <div key={block.seq} className={`msg msg--${block.kind}`}><Body block={block} streaming={activity.active && block.kind !== "tool"} /></div>)}</div>}
@@ -382,6 +413,8 @@ function Body({
   // transcript unreadable.
   if (block.kind === "tool") {
     const { status, detail } = toolMeta(block);
+    const note = savedContextNote(block.text, detail);
+    if (note) return <span className="muted">{note}</span>;
     return (
       <div className={`tool tool--${status}`}>
         <span className="tool__mark" aria-hidden="true">

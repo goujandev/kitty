@@ -1,0 +1,221 @@
+/* Projects and chats: the sidebar tree, its menus, renaming, confirmations,
+   notices and the no-project chooser. One type scale throughout: 12px for
+   small labels, 13px for secondary text, 14px for names, 16px for headings,
+   so nothing in the app is set smaller than 12px. */
+:root {
+  --font-xs: 12px;
+  --font-sm: 13px;
+  --font-md: 14px;
+  --font-lg: 16px;
+  --row-active: color-mix(in srgb, var(--text) 10%, transparent);
+  --row-hover: color-mix(in srgb, var(--text) 5%, transparent);
+  --row-pressed: color-mix(in srgb, var(--text) 14%, transparent);
+  /* Accent text, pulled toward the text colour so it stays readable on any surface. */
+  --link: color-mix(in srgb, var(--accent) 65%, var(--text));
+}
+
+/* ------------------------------------------------------------ sidebar */
+.ws-sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-width: 0;
+  min-height: 0;
+}
+/* Two alignment lines run down the whole sidebar: icons at 16px and every
+   label at 42px -- actions, projects, chats and Settings alike -- so the eye
+   travels straight down. Labels are quiet by default; only the open chat is
+   bright. No guide lines, coloured badges or accent bars: one hover tint and
+   one selection tint carry the structure. */
+.ws-sidebar--projects {
+  --row-h: 30px;
+  --row-active: color-mix(in srgb, var(--text) 9%, transparent);
+  --row-hover: color-mix(in srgb, var(--text) 5%, transparent);
+}
+.ws-sidebar--collapsed { width: 52px !important; }
+.ws-sidebar__head { display: flex; align-items: center; flex: none; gap: 2px; height: 40px; padding: 4px 8px; }
+.ws-brand { color: var(--text); font-size: var(--font-md); font-weight: 600; line-height: 20px; }
+.ws-sidebar .ws-icon-button { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.ws-sidebar .ws-icon-button:hover { background: var(--row-hover); color: var(--text); }
+.ws-sidebar--collapsed .ws-sidebar__head { justify-content: center; padding: 4px 10px; }
+
+/* New chat, New project, Search: named, with their shortcut on hover. */
+.ws-primary { display: flex; flex-direction: column; gap: 1px; flex: none; padding: 4px 8px 0; }
+.ws-action { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; height: var(--row-h); padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: var(--font-md); font-weight: 400; line-height: 20px; text-align: left; }
+.ws-action > svg { flex: none; color: currentColor; }
+.ws-action:hover { background: var(--row-hover); color: var(--text); }
+.ws-action:active { background: var(--row-pressed); }
+.ws-action__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-action__keys { flex: none; color: var(--muted-3); font: inherit; font-size: var(--font-xs); font-weight: 400; line-height: 16px; opacity: 0; }
+.ws-action:hover .ws-action__keys, .ws-action:focus-visible .ws-action__keys { opacity: 1; }
+.ws-sidebar--collapsed .ws-primary { align-items: center; padding: 4px 0 8px; }
+.ws-sidebar--collapsed .ws-action { justify-content: center; width: 36px; padding: 0; }
+
+.ws-section-label { display: flex; align-items: center; height: 28px; margin: 0; padding: 0 8px; color: var(--muted-3); font-size: var(--font-xs); font-weight: 500; line-height: 16px; }
+.ws-projects { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px 8px 12px; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: transparent transparent; }
+.ws-projects:hover, .ws-projects:focus-within { scrollbar-color: var(--muted-3) transparent; }
+.ws-project-list, .ws-chat-list, .ws-archived > ul { list-style: none; margin: 0; padding: 0; }
+
+/* A project: folder (a chevron while hovered), name, status, actions. */
+.ws-project { margin: 0 0 6px; }
+.ws-project.is-dragging { opacity: .5; }
+.ws-project__row { position: relative; display: flex; align-items: center; gap: 0; min-width: 0; height: var(--row-h); padding: 0 2px 0 0; border-radius: 6px; }
+.ws-project__row:hover, .ws-project__row:focus-within { background: var(--row-hover); }
+.ws-project__toggle { position: relative; display: inline-grid; place-items: center; flex: none; width: 34px; height: var(--row-h); padding: 0 0 0 8px; border: 0; border-radius: 6px 0 0 6px; background: transparent; color: var(--muted); cursor: pointer; justify-items: start; }
+.ws-project__icon, .ws-project__chevron { grid-area: 1 / 1; display: inline-grid; place-items: center; width: 16px; height: 16px; transition: opacity 100ms ease; }
+.ws-project__chevron { opacity: 0; }
+.ws-project__chevron svg { transition: transform 120ms ease; }
+.ws-project__toggle[aria-expanded="true"] .ws-project__chevron svg { transform: rotate(90deg); }
+.ws-project__row:hover .ws-project__icon, .ws-project__toggle:focus-visible .ws-project__icon { opacity: 0; }
+.ws-project__row:hover .ws-project__chevron, .ws-project__toggle:focus-visible .ws-project__chevron { opacity: 1; }
+.ws-project__toggle:hover { color: var(--text); }
+.ws-project__open { display: flex; align-items: center; flex: 1; gap: 8px; min-width: 0; height: var(--row-h); padding: 0 4px 0 0; border: 0; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: var(--font-md); font-weight: 400; line-height: 20px; text-align: left; }
+.ws-project__row:hover .ws-project__open { color: var(--text); }
+.ws-project.is-active > .ws-project__row .ws-project__open { color: var(--text); }
+.ws-project__open:disabled { color: var(--muted-3); cursor: default; }
+.ws-project__name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-project.is-unread .ws-project__name { font-weight: 600; }
+.ws-project__missing { flex: none; color: var(--muted-3); font-size: var(--font-xs); font-weight: 400; }
+.ws-project__row > .project-activity { margin-right: 4px; }
+.ws-project__row > .project-activity .project-activity__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+/* Chats: no indent marker, just the same text line as their project. */
+.ws-chat-list { margin: 1px 0 0; }
+.ws-chat { position: relative; display: flex; align-items: center; min-width: 0; height: var(--row-h); margin: 0 0 1px; border-radius: 6px; }
+.ws-chat:hover, .ws-chat:focus-within { background: var(--row-hover); }
+.ws-chat.is-active { background: var(--row-active); }
+.ws-chat__open { display: flex; align-items: center; flex: 1; gap: 8px; min-width: 0; height: var(--row-h); padding: 0 4px 0 34px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font: inherit; font-size: var(--font-md); font-weight: 400; line-height: 20px; text-align: left; }
+.ws-chat__open:hover, .ws-chat.is-active .ws-chat__open { color: var(--text); }
+.ws-chat__open:active { background: var(--row-pressed); }
+.ws-chat__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A chat is two lines: its title, and under it the model it runs on, beside
+   the provider's mark. The title keeps the full width of the row. */
+.ws-chat:has(.ws-chat__text) { height: 44px; }
+.ws-chat__open:has(.ws-chat__text) { align-items: flex-start; height: 44px; padding-top: 5px; }
+.ws-chat__open > .mark { flex: none; margin-top: 3px; }
+.ws-chat__text { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.ws-chat__model { overflow: hidden; color: var(--muted-3); font-size: var(--font-xs); line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+.ws-chat.is-active .ws-chat__model { color: var(--muted); }
+.ws-chat:has(.ws-chat__text) .ws-row-more { align-self: center; }
+.ws-chat__hint { flex: none; color: var(--muted-3); font-size: var(--font-xs); font-weight: 400; line-height: 16px; }
+.ws-chat__state { display: inline-grid; place-items: center; flex: none; color: var(--blocked); }
+.ws-chat.is-archived .ws-chat__open { color: var(--muted-3); }
+.ws-chat.is-archived .ws-chat__open:hover { color: var(--text); }
+.ws-chat-empty { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 5px 8px 5px 34px; color: var(--muted-3); font-size: var(--font-sm); line-height: 20px; }
+
+/* Archived: a quiet link at the end of the list, not another chat. */
+.ws-archived { margin-top: 1px; }
+.ws-archived__toggle { display: flex; align-items: center; gap: 6px; width: 100%; height: 26px; padding: 0 12px 0 34px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-3); cursor: pointer; font: inherit; font-size: var(--font-xs); line-height: 16px; }
+.ws-archived__toggle:hover { color: var(--text); }
+.ws-archived__count { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+/* The "⋯" on each row: present for the keyboard, shown to the pointer on hover. */
+.ws-row-more { display: inline-grid; place-items: center; flex: none; width: 26px; height: 26px; margin-right: 2px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; }
+.ws-project__row:hover .ws-row-more, .ws-chat:hover .ws-row-more,
+.ws-row-more:focus-visible, .ws-row-more[aria-expanded="true"] { opacity: 1; }
+.ws-row-more:hover, .ws-row-more[aria-expanded="true"] { background: var(--row-hover); color: var(--text); }@media (hover: none) { .ws-row-more { opacity: 1; } }
+
+.ws-link { padding: 0; border: 0; background: none; color: var(--link); cursor: pointer; font: inherit; font-size: inherit; font-weight: 500; text-decoration: underline; text-decoration-color: transparent; text-underline-offset: 3px; }
+.ws-link:hover { text-decoration-color: currentColor; }
+.ws-empty { padding: 8px; color: var(--muted-3); font-size: var(--font-sm); line-height: 20px; }
+.ws-empty p { margin: 0 0 4px; }
+.ws-error { margin: 4px 8px 8px; color: var(--danger); font-size: var(--font-sm); line-height: 20px; }
+
+.ws-nav--compact-projects { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; }
+.ws-nav--compact-projects .ws-nav__item { position: relative; display: grid; place-items: center; width: 36px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.ws-nav--compact-projects .ws-nav__item:hover { background: var(--row-hover); }
+.ws-nav--compact-projects .ws-nav__item.is-active { background: var(--row-active); }
+
+.ws-footer { display: flex; align-items: center; flex: none; padding: 8px; }
+.ws-action--footer { color: var(--muted); font-weight: 400; }
+.ws-action--footer:hover { color: var(--text); }
+.ws-sidebar--collapsed .ws-footer { justify-content: center; padding: 8px 0; }
+
+/* Distinct hover, focus, pressed and selected states for every row control. */
+.ws-sidebar button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+/* ----------------------------------------------------------- renaming */
+.inline-rename { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.inline-rename__input { width: 100%; height: 28px; padding: 0 8px; border: 1px solid var(--focus); border-radius: 6px; outline: none; background: var(--bg); color: var(--text); font: inherit; font-size: var(--font-md); font-weight: 500; line-height: 20px; user-select: text; }
+.inline-rename__input[aria-invalid="true"] { border-color: var(--danger); }
+.inline-rename__hint { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 5; padding: 6px 8px; border: 1px solid var(--edge-strong); border-radius: 6px; background: var(--popover); box-shadow: var(--shadow); color: var(--muted); font-size: var(--font-xs); font-weight: 400; line-height: 16px; white-space: normal; }
+.inline-rename__hint.is-error { color: var(--danger); }
+.ws-chat.is-renaming, .ws-project__row:has(.inline-rename) { background: transparent; }
+.ws-chat__rename { padding-left: 2px; }
+.ws-project__rename { margin-right: 4px; }
+
+/* -------------------------------------------------------------- menus */
+.action-menu { position: fixed; z-index: 200; min-width: 184px; max-width: calc(100vw - 16px); padding: 4px; border: 1px solid var(--edge-strong); border-radius: 8px; background: var(--popover); box-shadow: 0 10px 30px rgb(0 0 0 / 28%), var(--shadow); color: var(--text); }
+.action-menu__item { display: flex; align-items: center; gap: 16px; width: 100%; height: 32px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: var(--text); cursor: pointer; font: inherit; font-size: var(--font-md); line-height: 20px; text-align: left; }
+.action-menu__item kbd { margin-left: auto; color: var(--muted); font: inherit; font-size: var(--font-xs); line-height: 16px; }
+.action-menu__item:hover, .action-menu__item:focus { outline: none; background: var(--row-hover); }
+.action-menu__item:focus-visible { box-shadow: inset 0 0 0 2px var(--focus); }
+.action-menu__item:active { background: var(--row-pressed); }
+.action-menu__item--danger { color: var(--danger); }
+.action-menu__separator { height: 1px; margin: 4px 6px; background: var(--panel-edge); }
+@media (prefers-reduced-motion: no-preference) {
+  .action-menu { animation: menu-in 90ms ease-out; }
+  @keyframes menu-in { from { opacity: 0; transform: translateY(-2px); } }
+}
+
+/* ------------------------------------------------------ confirmations */
+.confirm-dialog { width: min(440px, calc(100vw - 32px)); padding: 20px; border: 1px solid var(--edge-strong); border-radius: 12px; background: var(--popover); box-shadow: 0 20px 50px rgb(0 0 0 / 35%); color: var(--text); }
+.confirm-dialog::backdrop { background: var(--overlay); }
+.confirm-dialog__title { margin: 0 0 8px; font-size: var(--font-lg); font-weight: 600; line-height: 24px; overflow-wrap: anywhere; }
+.confirm-dialog__body { color: var(--muted); font-size: var(--font-md); line-height: 22px; }
+.confirm-dialog__body p { margin: 0 0 8px; }
+.confirm-dialog__path { color: var(--text); font-family: "Cascadia Mono", Consolas, monospace; font-size: var(--font-sm); overflow-wrap: anywhere; user-select: text; }
+.confirm-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.confirm-dialog .button { height: 32px; padding: 0 14px; font-size: var(--font-md); font-weight: 500; line-height: 20px; }
+/* Darkened so white text on it stays readable in every theme. */
+.button--danger { border-color: transparent; background: color-mix(in srgb, var(--danger) 72%, #000); color: #fff; }
+.button--danger:hover:not(:disabled) { border-color: transparent; filter: brightness(1.08); }
+.button--primary { display: inline-flex; align-items: center; gap: 8px; border-color: transparent; background: var(--accent); color: var(--on-accent); }
+.button--primary:hover:not(:disabled) { border-color: transparent; filter: brightness(1.08); }
+
+/* ------------------------------------------------------------ notices */
+/* Under the title bar, clear of the composer and whatever is being typed. */
+.notice-host { position: absolute; left: 50%; top: 48px; z-index: 90; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px); pointer-events: none; }
+.notice { display: flex; align-items: center; gap: 12px; min-height: 40px; padding: 6px 6px 6px 14px; border: 1px solid var(--edge-strong); border-radius: 10px; background: var(--popover); box-shadow: 0 10px 30px rgb(0 0 0 / 25%); color: var(--text); font-size: var(--font-md); line-height: 20px; pointer-events: auto; }
+.notice--error { border-color: color-mix(in srgb, var(--danger) 45%, var(--edge-strong)); }
+.notice--error .notice__text::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--danger); vertical-align: 1px; }
+.notice__text { min-width: 0; }
+.notice__action { flex: none; height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: var(--row-hover); color: var(--link); cursor: pointer; font: inherit; font-weight: 600; }
+.notice__action:hover { background: var(--row-active); }
+.notice__close { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.notice__close:hover { background: var(--row-hover); color: var(--text); }
+@media (prefers-reduced-motion: no-preference) {
+  .notice { animation: notice-in 140ms ease-out; }
+  @keyframes notice-in { from { opacity: 0; transform: translateY(-6px); } }
+}
+
+/* ------------------------------------------------ title and archive note */
+.workspace-title { min-width: 0; overflow: hidden; padding: 4px 8px; margin-left: -8px; border: 0; border-radius: 6px; background: transparent; color: var(--text); cursor: text; font: inherit; font-size: var(--font-md); font-weight: 600; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
+button.workspace-title:hover { background: var(--row-hover); }
+.workspace-title--static { margin-left: 0; padding-inline: 0; cursor: default; }
+.workspace-title__badge { margin-left: 8px; padding: 1px 6px; border-radius: 4px; background: var(--secondary); color: var(--muted); font-size: var(--font-xs); font-weight: 500; line-height: 16px; vertical-align: 1px; }
+.workspace-title__rename { flex: 0 1 360px; }
+.workspace-breadcrumb { gap: 8px; }
+.workspace-breadcrumb__project { color: var(--muted); }
+.archived-note { display: flex; align-items: baseline; justify-content: center; flex-wrap: wrap; gap: 4px 10px; max-width: var(--column); margin: 0 auto 10px; color: var(--muted); font-size: var(--font-sm); line-height: 20px; text-align: center; }
+
+/* ------------------------------------------------------ project chooser */
+.project-chooser { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; min-height: 0; overflow-y: auto; padding: 32px 16px; text-align: center; }
+.project-chooser h1 { max-width: 560px; margin: 0 0 8px; color: var(--text); font-size: 26px; font-weight: 500; letter-spacing: -.5px; line-height: 34px; }
+.project-chooser > p { max-width: 440px; margin: 0 0 24px; color: var(--muted); font-size: var(--font-md); line-height: 22px; }
+.project-chooser .button--primary { height: 36px; padding: 0 16px; font-size: var(--font-md); font-weight: 500; }
+.project-chooser__label { margin: 28px 0 8px; color: var(--muted); font-size: var(--font-xs); font-weight: 600; letter-spacing: .02em; line-height: 16px; }
+.project-chooser__list { display: grid; gap: 4px; width: min(420px, 100%); margin: 0; padding: 0; list-style: none; }
+.project-chooser__project { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; column-gap: 10px; width: 100%; padding: 8px 12px; border: 1px solid var(--panel-edge); border-radius: 8px; background: transparent; color: var(--text); cursor: pointer; font: inherit; text-align: left; }
+.project-chooser__project:hover { background: var(--row-hover); border-color: var(--edge-strong); }
+.project-chooser__project:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.project-chooser__name { overflow: hidden; font-size: var(--font-md); font-weight: 500; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
+.project-chooser__path { grid-column: 2; overflow: hidden; color: var(--muted); font-size: var(--font-xs); line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 640px) {
+  .project-chooser h1 { font-size: 22px; line-height: 30px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-project__toggle svg, .ws-archived__toggle svg { transition: none; }
+}

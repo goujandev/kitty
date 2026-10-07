@@ -1,0 +1,73 @@
+/* T3 Code's desktop surfaces and component geometry, translated from its
+   Tailwind classes. Copyright 2026 T3 Tools Inc. (MIT); provenance in docs. */
+.ws-sidebar--projects {
+  --text: var(--sidebar-text, #f1f3f7);
+  --muted: var(--sidebar-muted, #a3a3a3);
+  --muted-2: var(--sidebar-muted, #a3a3a3);
+  --muted-3: var(--sidebar-muted-3, #737373);
+  --hover: var(--sidebar-hover, rgb(255 255 255 / 8%));
+  --secondary-hover: var(--sidebar-hover, rgb(255 255 255 / 8%));
+  width: 256px;
+  color: var(--muted);
+  background: var(--sidebar-bg);
+  border-right-color: var(--sidebar-edge, rgb(255 255 255 / 8%));
+}
+[data-theme="light"] .ws-sidebar--projects {
+  --text: #27272a;
+  --muted: #71717a;
+  --muted-2: #71717a;
+  --muted-3: #a1a1aa;
+  --hover: rgb(0 0 0 / 5%);
+  --secondary-hover: rgb(0 0 0 / 5%);
+  background: var(--sidebar-bg);
+  border-right-color: rgb(0 0 0 / 8%);
+}
+.project-monogram { display: inline-flex; width: 16px; height: 16px; flex: none; align-items: center; justify-content: center; color: var(--project-icon-dark); }
+[data-theme="light"] .project-monogram, [data-theme="solarized-light"] .project-monogram { color: var(--project-icon-light); }
+.project-monogram svg { width: 100%; height: 100%; overflow: hidden; border-radius: 25%; background: color-mix(in srgb, currentColor 14%, transparent); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+.workspace-breadcrumb { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 12px; font-size: 14px; color: var(--muted); }
+.workspace-breadcrumb > span, .workspace-breadcrumb strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-breadcrumb .project-monogram { overflow: visible; }
+.workspace-breadcrumb strong { color: var(--text); font-weight: 600; }
+.workspace-breadcrumb__divider { padding: 0 2px; color: var(--muted-3); }
+.workspace-tabs { border-bottom: 0; background: var(--bg); height: 40px; padding: 0 8px; }
+.workspace-tabs .wincontrol { width: 46px; height: 32px; }
+.workspace .chat--blank .canvas { justify-content: safe center; }
+.workspace .chat--blank .dock { position: relative; margin-block: auto; padding: 0 16px 20px; }
+.draft-headline { position: absolute; bottom: calc(100% + 32px); left: 16px; right: 16px; margin: 0; color: var(--text); font-size: 28px; font-weight: 500; letter-spacing: -1px; line-height: 40px; text-align: center; }
+.draft-headline > span { text-decoration: underline dotted; text-decoration-color: var(--muted-3); text-underline-offset: 4px; text-decoration-thickness: 1px; }
+.workspace .composer { padding: 0; max-width: var(--column); }
+.composer__box { border-radius: 24px; }
+.composer__box:focus-within { border-color: var(--composer-outline); }
+.composer__body { padding: 16px 16px 8px; }
+.composer__input { min-height: 70px; font-size: 14px; line-height: 24px; }
+.composer__input::placeholder { color: var(--composer-placeholder); }
+.composer__tools { padding: 0 16px 16px; min-height: 48px; }
+.composer__choices { gap: 8px; }
+.composer__choices > .pop + .pop::before { content: ""; position: absolute; left: -4px; top: 8px; bottom: 8px; width: 1px; background: var(--panel-edge); }
+.composer__choices .chip { padding: 4px 0; gap: 6px; min-height: 28px; font-size: 14px; color: var(--muted); }
+.composer__choices > .pop + .pop .chip { padding-left: 10px; padding-right: 10px; }
+.composer__send:disabled { opacity: .64; }
+.composer__context { margin: -16px 22px 0; padding: 20px 8px 4px 4px; border-radius: 0 0 16px 16px; background: var(--composer-context-bg); border-color: var(--composer-context-edge); }
+.workspace .composer__context .contextrow { min-height: 24px; }
+.workspace .composer__context .chip--path { height: 24px; font-size: 12px; max-width: 100%; padding: 2px 5px; }
+.composer__context .chip--path .chip__label { direction: ltr; }
+.pop__row--button { gap: 8px; }
+.banner--error button { margin-left: 8px; padding: 3px 8px; border: 1px solid color-mix(in srgb, var(--danger) 20%, transparent); border-radius: 6px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.banner--error button:hover { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+@media (max-width: 640px) {
+  .draft-headline { font-size: 22px; line-height: 30px; bottom: calc(100% + 24px); letter-spacing: -.5px; }
+  .workspace .chat--blank .dock { padding-inline: 12px; }
+  .composer__body { padding: 12px 12px 8px; }
+  .composer__tools { padding: 0 12px 12px; }
+  .composer__choices { gap: 4px; }
+  .composer__choices .chip { font-size: 12px; }
+  .composer__choices > .pop + .pop .chip { padding-inline: 4px; }
+  .composer__choices > .pop + .pop::before { display: none; }
+  .workspace-breadcrumb { padding-left: 4px; gap: 6px; font-size: 12px; }
+  /* The conversation title matters more than the project name, already in the monogram. */
+  .workspace-breadcrumb > span:not(.project-monogram) { display: none; }
+}
+@media (max-height: 460px) {
+  .workspace .chat--blank .dock { margin-top: 100px; }
+}

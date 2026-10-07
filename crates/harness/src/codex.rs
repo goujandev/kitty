@@ -66,6 +66,11 @@ pub struct CodexCodec {
     resume: Option<String>,
     model: Option<String>,
     effort: Option<String>,
+    startup_error: Option<String>,
+    recovered_context: bool,
+    /// A cancel arrived after `turn/start` was sent but before the server
+    /// named the turn. Interrupt it as soon as `turn/started` supplies the id.
+    cancel_pending: bool,
 }
 
 impl CodexCodec {
@@ -140,6 +145,9 @@ impl Codec for CodexCodec {
     }
 
     fn send_turn(&mut self, text: &str) -> Step {
+        if let Some(message) = &self.startup_error {
+            return rejected_request(message.clone());
+        }
         if let Some(line) = self.turn_start_frame(text) {
             return Step::send(line);
         }
@@ -168,21 +176,19 @@ impl Codec for CodexCodec {
     }
 
     fn cancel(&mut self) -> Step {
-        let (Some(thread), Some(turn)) = (self.thread_id.clone(), self.turn_id.clone()) else {
-            // Nothing running. Drop any prompt that never made it out, so it
-            // does not fire after the user asked to stop.
-            self.queued_turn = None;
+        // A prompt that never made it out still owns the engine's turn. Settle
+        // it here, or the engine would wait for a completion that never comes.
+        if self.queued_turn.take().is_some() {
+            return Step::event(SessionEvent::TurnEnded {
+                stop: StopReason::Cancelled,
+            });
+        }
+        if self.turn_id.is_none() {
+            // `turn/start` is in flight; the server has not named the turn.
+            self.cancel_pending = true;
             return Step::none();
-        };
-        self.next_id += 1;
-        Step::send(
-            json!({
-                "id": self.next_id,
-                "method": "turn/interrupt",
-                "params": { "threadId": thread, "turnId": turn },
-            })
-            .to_string(),
-        )
+        }
+        self.interrupt()
     }
 
     fn on_frame(&mut self, line: &str) -> Step {
@@ -206,7 +212,34 @@ impl Codec for CodexCodec {
     }
 }
 
+fn rejected_request(message: String) -> Step {
+    Step::event(SessionEvent::Error {
+        error_kind: classify(&message),
+        message: message.clone(),
+        retryable: false,
+    })
+    .with_event(SessionEvent::TurnEnded {
+        stop: StopReason::Failed { message },
+    })
+}
+
 impl CodexCodec {
+    fn interrupt(&mut self) -> Step {
+        let (Some(thread), Some(turn)) = (self.thread_id.clone(), self.turn_id.clone()) else {
+            return Step::none();
+        };
+        self.cancel_pending = false;
+        self.next_id += 1;
+        Step::send(
+            json!({
+                "id": self.next_id,
+                "method": "turn/interrupt",
+                "params": { "threadId": thread, "turnId": turn },
+            })
+            .to_string(),
+        )
+    }
+
     fn on_response(&mut self, id: u64, msg: &Value) -> Step {
         let Some(what) = self.pending.remove(&id) else {
             return Step::none();
@@ -216,11 +249,25 @@ impl CodexCodec {
             let message = str_field(error, "message")
                 .unwrap_or("the app-server rejected a request")
                 .to_owned();
-            return Step::event(SessionEvent::Error {
-                error_kind: classify(&message),
-                message,
-                retryable: false,
-            });
+            // A missing saved context is recoverable once during the handshake.
+            // Preserve only current input; never load/replay Kitty's transcript.
+            if what == Pending::ThreadStart
+                && self.resume.as_ref().is_some_and(|thread| {
+                    message.trim() == format!("no rollout found for thread id {thread}")
+                })
+            {
+                self.resume = None;
+                self.recovered_context = true;
+                return Step::send(self.open_thread());
+            }
+            // A rejected request will never receive turn/completed. Settle
+            // held input, and fail later prompts visibly if startup failed.
+            if matches!(what, Pending::Initialize | Pending::ThreadStart) {
+                self.startup_error = Some(message.clone());
+                self.queued_turn = None;
+            }
+            self.turn_id = None;
+            return rejected_request(message);
         }
 
         let result = msg.get("result").unwrap_or(&Value::Null);
@@ -247,6 +294,12 @@ impl CodexCodec {
                     provider_session: id,
                     model,
                 });
+                if std::mem::take(&mut self.recovered_context) {
+                    step.events.push(SessionEvent::Status {
+                        text: "Agent ready with fresh context. Your saved chat history is kept."
+                            .into(),
+                    });
+                }
                 if let Some(text) = self.queued_turn.take() {
                     if let Some(line) = self.turn_start_frame(&text) {
                         step.send.push(line);
@@ -279,7 +332,12 @@ impl CodexCodec {
                     .get("turn")
                     .and_then(|t| str_field(t, "id"))
                     .map(str::to_owned);
-                Step::event(SessionEvent::TurnStarted)
+                let started = Step::event(SessionEvent::TurnStarted);
+                if self.cancel_pending {
+                    let interrupt = self.interrupt();
+                    return interrupt.send.into_iter().fold(started, Step::with_send);
+                }
+                started
             }
 
             "item/agentMessage/delta" => {
@@ -326,6 +384,7 @@ impl CodexCodec {
 
             "turn/completed" => {
                 self.turn_id = None;
+                self.cancel_pending = false;
                 let turn = params.get("turn").unwrap_or(&Value::Null);
                 Step::event(SessionEvent::TurnEnded {
                     stop: stop_reason_from(turn),
@@ -715,6 +774,56 @@ mod tests {
     }
 
     #[test]
+    fn rejected_turn_settles_and_next_request_can_be_sent() {
+        let mut codec = CodexCodec::new();
+        handshake(&mut codec);
+        let turn = parse(&codec.send_turn("first").send[0]);
+        let rejected = feed(
+            &mut codec,
+            json!({"id": turn["id"], "error": {"message": "bad model"}}),
+        );
+        assert!(
+            matches!(rejected.events.last(), Some(SessionEvent::TurnEnded { stop: StopReason::Failed { message } }) if message == "bad model")
+        );
+        let next = codec.send_turn("second");
+        assert_eq!(parse(&next.send[0])["params"]["input"][0]["text"], "second");
+    }
+
+    #[test]
+    fn rejected_resume_drops_held_prompt_and_fails_later_input_visibly() {
+        let mut codec = CodexCodec::new();
+        let start = codec.start(&StartContext {
+            cwd: "C:\\work".into(),
+            resume: Some("missing".into()),
+            model: None,
+            effort: None,
+        });
+        let init = parse(&start.send[0]);
+        let after = feed(&mut codec, json!({"id": init["id"], "result": {}}));
+        let open = parse(&after.send[1]);
+        assert_eq!(codec.send_turn("held").send.len(), 0);
+        let rejected = feed(
+            &mut codec,
+            json!({"id": open["id"], "error": {"message": "missing thread"}}),
+        );
+        assert!(matches!(
+            rejected.events.last(),
+            Some(SessionEvent::TurnEnded {
+                stop: StopReason::Failed { .. }
+            })
+        ));
+        assert!(codec.queued_turn.is_none());
+        let later = codec.send_turn("new request");
+        assert_eq!(later.send.len(), 0);
+        assert!(matches!(
+            later.events.last(),
+            Some(SessionEvent::TurnEnded {
+                stop: StopReason::Failed { .. }
+            })
+        ));
+    }
+
+    #[test]
     fn resume_reopens_the_named_thread() {
         let mut codec = CodexCodec::new();
         let start = codec.start(&StartContext {
@@ -728,6 +837,121 @@ mod tests {
         let open = parse(&after.send[1]);
         assert_eq!(open["method"], "thread/resume");
         assert_eq!(open["params"]["threadId"], "thread-7");
+    }
+
+    #[test]
+    fn a_cancel_before_the_turn_is_named_interrupts_once_it_starts() {
+        let mut codec = CodexCodec::new();
+        handshake(&mut codec);
+        codec.send_turn("work");
+        assert!(codec.cancel().is_empty());
+        let started = feed(
+            &mut codec,
+            json!({"method": "turn/started", "params": {"turn": {"id": "turn-1"}}}),
+        );
+        assert_eq!(started.events, vec![SessionEvent::TurnStarted]);
+        let interrupt = parse(&started.send[0]);
+        assert_eq!(interrupt["method"], "turn/interrupt");
+        assert_eq!(interrupt["params"]["turnId"], "turn-1");
+    }
+
+    fn resume_for_recovery(codec: &mut CodexCodec) -> Value {
+        let start = codec.start(&StartContext {
+            cwd: r"C:\work".into(),
+            resume: Some("missing-thread".into()),
+            model: Some("chosen-model".into()),
+            effort: Some("medium".into()),
+        });
+        let init = parse(&start.send[0]);
+        let ready = feed(codec, json!({"id": init["id"], "result": {}}));
+        parse(&ready.send[1])
+    }
+
+    fn missing_rollout(codec: &mut CodexCodec, request: &Value) -> Step {
+        feed(
+            codec,
+            json!({"id": request["id"], "error": {
+                "code": -32600,
+                "message": "no rollout found for thread id missing-thread"
+            }}),
+        )
+    }
+
+    #[test]
+    fn unavailable_saved_context_recovers_without_error_or_replaying_history() {
+        let mut codec = CodexCodec::new();
+        let resume = resume_for_recovery(&mut codec);
+        let recovery = missing_rollout(&mut codec, &resume);
+        assert_eq!(recovery.events.len(), 0);
+        assert_eq!(recovery.send.len(), 1);
+        let fresh = parse(&recovery.send[0]);
+        assert_eq!(fresh["method"], "thread/start");
+        assert_eq!(fresh["params"]["cwd"], r"C:\work");
+        assert_eq!(fresh["params"]["model"], "chosen-model");
+        assert!(fresh["params"].get("threadId").is_none());
+        assert_eq!(fresh["params"]["sandbox"], "read-only");
+        assert_eq!(fresh["params"]["approvalPolicy"], "on-request");
+        let ready = feed(
+            &mut codec,
+            json!({"id": fresh["id"], "result": {"thread": {"id": "new-thread"}}}),
+        );
+        assert!(
+            ready.send.is_empty(),
+            "Opening a project must not replay a prompt"
+        );
+        assert!(
+            matches!(&ready.events[0], SessionEvent::Started { provider_session: Some(id), .. } if id == "new-thread")
+        );
+        assert!(
+            matches!(&ready.events[1], SessionEvent::Status { text } if text.contains("fresh context"))
+        );
+        assert!(codec.startup_error.is_none());
+    }
+
+    #[test]
+    fn context_recovery_sends_only_current_explicit_input_with_selected_effort() {
+        let mut codec = CodexCodec::new();
+        let resume = resume_for_recovery(&mut codec);
+        assert_eq!(codec.send_turn("current request").send.len(), 0);
+        let fresh = parse(&missing_rollout(&mut codec, &resume).send[0]);
+        let ready = feed(
+            &mut codec,
+            json!({"id": fresh["id"], "result": {"thread": {"id": "new-thread"}}}),
+        );
+        assert_eq!(ready.send.len(), 1);
+        let turn = parse(&ready.send[0]);
+        assert_eq!(turn["method"], "turn/start");
+        assert_eq!(turn["params"]["threadId"], "new-thread");
+        assert_eq!(turn["params"]["input"][0]["text"], "current request");
+        assert_eq!(turn["params"]["effort"], "medium");
+    }
+
+    #[test]
+    fn stop_during_context_recovery_discards_current_input() {
+        let mut codec = CodexCodec::new();
+        let resume = resume_for_recovery(&mut codec);
+        codec.send_turn("cancel me");
+        let fresh = parse(&missing_rollout(&mut codec, &resume).send[0]);
+        codec.cancel();
+        let ready = feed(
+            &mut codec,
+            json!({"id": fresh["id"], "result": {"thread": {"id": "new-thread"}}}),
+        );
+        assert_eq!(ready.send.len(), 0);
+    }
+
+    #[test]
+    fn fresh_context_failure_is_visible_and_does_not_retry_forever() {
+        let mut codec = CodexCodec::new();
+        let resume = resume_for_recovery(&mut codec);
+        let fresh = parse(&missing_rollout(&mut codec, &resume).send[0]);
+        let failure = missing_rollout(&mut codec, &fresh);
+        assert_eq!(failure.send.len(), 0);
+        assert!(matches!(
+            failure.events.first(),
+            Some(SessionEvent::Error { .. })
+        ));
+        assert!(codec.startup_error.is_some());
     }
 
     #[test]
@@ -911,7 +1135,15 @@ mod tests {
         let mut codec = CodexCodec::new();
         codec.start(&ctx());
         codec.send_turn("do not send me");
-        assert!(codec.cancel().is_empty());
+        let cancelled = codec.cancel();
+        assert_eq!(cancelled.send, Vec::<String>::new());
+        // The engine counted this as a turn; it must still be told it ended.
+        assert_eq!(
+            cancelled.events,
+            vec![SessionEvent::TurnEnded {
+                stop: StopReason::Cancelled
+            }]
+        );
         assert!(
             codec.queued_turn.is_none(),
             "the queued prompt must be dropped"

@@ -6,7 +6,7 @@ import type {
   ModelCatalog,
   ModelInfo,
 } from "../ipc/bindings";
-import { Mark } from "./Marks";
+import { ProviderMark } from "./Marks";
 import { Popover } from "./Popover";
 
 /**
@@ -38,7 +38,6 @@ export function ModelTools({
   locked,
   disabled,
   onOpen,
-  onRefresh,
   onChoose,
   onStar,
   below,
@@ -87,9 +86,10 @@ export function ModelTools({
         disabled={disabled}
         onOpen={onOpen}
         title="Model"
+        trigger="chip chip--model"
         label={
           <>
-            {harness && <Mark harness={harness} size={15} />}
+            {harness && <ProviderMark harness={harness} size={15} />}
             <span className="chip__label">{name}</span>
           </>
         }
@@ -102,7 +102,6 @@ export function ModelTools({
             model={model}
             favourites={favourites}
             locked={locked}
-            onRefresh={onRefresh}
             onStar={onStar}
             onChoose={(vendor, id, level) => {
               onChoose(vendor, id, level);
@@ -118,7 +117,7 @@ export function ModelTools({
           narrow
           disabled={disabled}
           title="Reasoning effort"
-          label={<span className="chip__label">{effortLabel(effort)}</span>}
+          label={<span className="chip__label">{effortLabel(effort ?? shown.defaultEffort)}</span>}
         >
           {(close) => (
             <>
@@ -134,7 +133,7 @@ export function ModelTools({
                   }}
                 >
                   <span className="pop__row-name">{effortLabel(level)}</span>
-                  {level === effort && <Tick />}
+                  {level === (effort ?? shown.defaultEffort) && <Tick />}
                 </button>
               ))}
             </>
@@ -206,7 +205,6 @@ function Models({
   model,
   favourites,
   locked,
-  onRefresh,
   onStar,
   onChoose,
 }: {
@@ -216,12 +214,13 @@ function Models({
   model: string | null;
   favourites: Partial<Record<HarnessId, string[]>>;
   locked: boolean;
-  onRefresh: (harness: HarnessId) => void;
   onStar: (harness: HarnessId, model: string) => void;
   onChoose: (harness: HarnessId, model: string, effort: string | null) => void;
 }): React.ReactElement {
-  const [custom, setCustom] = useState("");
   const [filter, setFilter] = useState("");
+  const [category, setCategory] = useState<HarnessId | "favourites">(() =>
+    Object.values(favourites).some(ids => ids && ids.length > 0) ? "favourites" : harness ?? harnesses[0]?.id ?? "favourites",
+  );
 
   const starredHere = useCallback(
     (entry: Entry): boolean =>
@@ -232,7 +231,7 @@ function Models({
   // Searching collapses all of it into one list: when you are hunting for a
   // name, whose model it is and which group it is in are not the question you
   // are asking.
-  const { starred, groups, searching, empty } = useMemo(() => {
+  const { starred, groups, empty } = useMemo(() => {
     const needle = filter.trim().toLowerCase();
     const matches = (entry: Entry): boolean =>
       !needle ||
@@ -249,24 +248,22 @@ function Models({
       return { starred: [], groups: [all], searching: true, empty: all.length === 0 };
     }
 
-    const stars = all.filter(starredHere);
-    const rest = harnesses.map((status) =>
-      all.filter((entry) => entry.harness === status.id && !starredHere(entry)),
-    );
+    const stars = category === "favourites" ? all.filter(starredHere) : [];
+    const rest = [category === "favourites" ? [] : all.filter(entry => entry.harness === category)];
     return {
       starred: stars,
       groups: rest,
       searching: false,
-      empty: all.length === 0,
+      empty: stars.length === 0 && rest.every(entries => entries.length === 0),
     };
-  }, [catalogs, favourites, filter, harnesses, starredHere]);
+  }, [catalogs, favourites, filter, harnesses, starredHere, category]);
 
   const row = (entry: Entry) => {
     const { model: info } = entry;
     const starredNow = starredHere(entry);
     // Only the vendor already running this conversation can keep running it.
     const reachable = !locked || harness === null || entry.harness === harness;
-    const chosen = entry.harness === harness && info.id === model;
+    const chosen = entry.harness === harness && (info.id === model || model === null && info.isDefault);
 
     return (
       <div
@@ -284,9 +281,8 @@ function Models({
           }
           onClick={() => onChoose(entry.harness, info.id, info.defaultEffort)}
         >
-          <Mark harness={entry.harness} size={15} />
+          <ProviderMark harness={entry.harness} size={15} />
           <span className="pop__row-name">{info.displayName}</span>
-          {info.isDefault && <span className="pop__tag">default</span>}
         </button>
         <button
           type="button"
@@ -305,13 +301,21 @@ function Models({
   const loading = harnesses.some((status) => !catalogs[status.id]);
 
   return (
-    <>
+    <div className="model-picker">
       <input
         className="pop__search"
         value={filter}
         placeholder="Search models"
+        aria-label="Search models"
         onChange={(event) => setFilter(event.target.value)}
       />
+      <div className="model-picker__body">
+        <nav className="model-picker__rail" aria-label="Model providers">
+          <button type="button" title="Favourites" aria-label="Favourites" aria-pressed={category === "favourites"} onClick={() => { setCategory("favourites"); setFilter(""); }}><Star on={false} /></button>
+          {harnesses.map(provider => <button key={provider.id} type="button" title={provider.label} aria-label={provider.label} aria-pressed={category === provider.id} onClick={() => { setCategory(provider.id); setFilter(""); }}><ProviderMark harness={provider.id} size={18} /></button>)}
+        </nav>
+        <div className="model-picker__list">
+      <div className="pop__section">{filter.trim() ? "Search results" : category === "favourites" ? "Favourites" : harnesses.find(provider => provider.id === category)?.label}</div>
 
       {empty && loading && <p className="muted pop__note">Asking the CLIs…</p>}
       {empty && !loading && (
@@ -320,59 +324,22 @@ function Models({
         </p>
       )}
 
-      {starred.length > 0 && <div className="pop__section">Favourites</div>}
       {starred.map(row)}
 
       {groups.map((entries, index) => {
         if (entries.length === 0) return null;
-        const status = harnesses[index];
         return (
-          <div key={status?.id ?? index}>
+          <div key={index}>
             {/* Named per vendor rather than one "All models" heading, so the
                 two lists are told apart by reading and not by squinting at the
                 logo on every row. */}
-            {!searching && status && (
-              <div className="pop__section">{status.label}</div>
-            )}
             {entries.map(row)}
           </div>
         );
       })}
+        </div>
+      </div>
 
-      {harness && (
-        <>
-          <form
-            className="pop__custom"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const id = custom.trim();
-              if (!id) return;
-              // Passed through untouched: if the probe has not caught up with
-              // a new model, typing its id should still work.
-              onChoose(harness, id, null);
-              setCustom("");
-            }}
-          >
-            <input
-              className="pop__input"
-              value={custom}
-              placeholder="Or type a model id"
-              onChange={(event) => setCustom(event.target.value)}
-            />
-            <button type="submit" className="button" disabled={!custom.trim()}>
-              Use
-            </button>
-          </form>
-
-          <button
-            type="button"
-            className="linkish pop__refresh"
-            onClick={() => onRefresh(harness)}
-          >
-            Refresh from {harness}
-          </button>
-        </>
-      )}
-    </>
+    </div>
   );
 }

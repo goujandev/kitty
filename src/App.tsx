@@ -1,196 +1,131 @@
 import { useEffect, useState } from "react";
-
-import {
-  chooseProject,
-  listen,
-  newChat,
-  newSession,
-  openById,
-  openSessionAnywhere,
-  loadDefaultChoice,
-  restoreLastProject,
-  useChat,
-} from "./stores/chatStore";
+import { chooseProject, listen, loadDefaultChoice, newSession, newSessionInProject, openById, openSession, openSessionAnywhere, restoreLastProject, useChat } from "./stores/chatStore";
 import { loadAppearance, nudgeZoom } from "./stores/appearanceStore";
 import { initialise, useHarnessState } from "./stores/harnessStore";
-import { useProjects } from "./stores/projectStore";
-import { ChatView } from "./views/ChatView";
 import { WorkspaceSidebar } from "./views/WorkspaceSidebar";
-import { ThreadLibrary } from "./views/ThreadLibrary";
+import { ChatView } from "./views/ChatView";
 import { SearchDialog } from "./views/SearchDialog";
 import { SettingsDialog, type Section } from "./views/Settings";
-import { Icon } from "./views/Icon";
-import { initialiseUpdates } from "./stores/updateStore";
 import { WindowControls } from "./views/WindowControls";
+import { Icon } from "./views/Icon";
+import { ProjectChooser } from "./views/ProjectChooser";
+import { TabBar, cycleTabs } from "./views/TabBar";
+import { DRAFT, tabsFor } from "./stores/tabStore";
+import { NoticeHost } from "./views/NoticeHost";
+import { focusChooser } from "./views/focus";
+import { initialiseUpdates } from "./stores/updateStore";
+import { useAppearance } from "./stores/appearanceStore";
+import { useWallpaperPalette } from "./views/Wallpaper";
 
-/** Shared workspace chrome around Kitty's existing session and model stores. */
+/** Whether a key press belongs to a text field rather than the app. */
+function typing(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+}
+
 export function App(): React.ReactElement {
-  // Settings overlays the workspace without replacing its conversation.
   const [settings, setSettings] = useState<Section | null>(null);
-  const [view, setView] = useState<"home" | "chat" | "threads">("home");
   const [searchOpen, setSearchOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => {
-    try { return localStorage.getItem("kitty:sidebar-collapsed") === "true"; }
-    catch { return false; }
-  });
-  const [tabs, setTabs] = useState<{ id: string; projectId: string; title: string }[]>([]);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
+  const [renamingTitle, setRenamingTitle] = useState(false);
+  const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 760px)").matches);
+  const [narrowExpanded, setNarrowExpanded] = useState(false);
+  const sidebarCollapsed = narrow ? !narrowExpanded : collapsed;
+  const toggleSidebar = () => { if (narrow) setNarrowExpanded(value => !value); else setCollapsed(value => !value); };
   const chat = useChat();
+  const { background } = useAppearance();
+  useWallpaperPalette(background);
   const { scan } = useHarnessState();
-  const projectIndex = useProjects();
-  const firstReady = (scan?.harnesses ?? []).find((h) => h.ready)?.id;
-  const startThread = () => {
-    if (!firstReady) { setSettings("agents"); return; }
-    setSettings(null);
-    setView("chat");
-    if (chat.project && (chat.project.root !== null || chat.activeId === null)) newSession();
-    else void newChat();
+  const canStart = (scan?.harnesses ?? []).some(harness => harness.ready);
+  const active = chat.draft === null ? chat.sessions.find(session => session.id === chat.activeId) ?? null : null;
+  /** New chat: a draft in the open project, or the project chooser when none is open. */
+  const startChat = (projectId?: string) => {
+    setNarrowExpanded(false);
+    if (!canStart) { setSettings("agents"); return; }
+    if (projectId && projectId !== chat.project?.id) void newSessionInProject(projectId);
+    else if (chat.project) newSession();
+    else focusChooser();
   };
-  const openThread = (projectId: string, id: string) => {
-    setView("chat");
-    setSettings(null);
-    void openSessionAnywhere(projectId, id);
-  };
-  const toggleSidebar = () => setCollapsed((value) => {
-    try { localStorage.setItem("kitty:sidebar-collapsed", String(!value)); } catch { /* Window state still works without storage. */ }
-    return !value;
-  });
-
+  const addProject = () => { setNarrowExpanded(false); void chooseProject(); };
+  useEffect(() => { setDetailsOpen(false); setRenamingTitle(false); }, [chat.project?.id]);
+  useEffect(() => setRenamingTitle(false), [chat.activeId]);
   useEffect(() => {
-    if (!chat.activeId || !chat.project) return;
-    // A project switch loads its rows before opening the requested thread.
-    // Do not attribute the previous active thread to that new project.
-    const session = chat.sessions.find(s => s.id === chat.activeId && s.projectId === chat.project?.id);
-    if (!session) return;
-    const entry = { id: session.id, projectId: session.projectId, title: session.title ?? "Untitled thread" };
-    setTabs(previous => {
-      const existing = previous.findIndex(tab => tab.id === entry.id);
-      if (existing >= 0) {
-        if (previous[existing]?.title === entry.title && previous[existing]?.projectId === entry.projectId) return previous;
-        return previous.map(tab => tab.id === entry.id ? entry : tab);
-      }
-      return [...previous, entry];
-    });
-  }, [chat.activeId, chat.project, chat.sessions]);
-
-  useEffect(() => { if (chat.activeId) setView("chat"); }, [chat.activeId]);
-
+    const media = window.matchMedia("(max-width: 760px)");
+    const update = () => setNarrow(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
   useEffect(() => {
-    if (projectIndex.loading || projectIndex.error) return;
-    const ids = new Set(projectIndex.projects.map(project => project.id));
-    setTabs(previous => previous.some(tab => !ids.has(tab.projectId)) ? previous.filter(tab => ids.has(tab.projectId)) : previous);
-  }, [projectIndex.projects, projectIndex.loading, projectIndex.error]);
-
-  useEffect(() => {
-    const onShortcut = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
-      if (event.key.toLowerCase() === "k") { event.preventDefault(); setSearchOpen(true); }
-      if (event.key.toLowerCase() === "b") { event.preventDefault(); toggleSidebar(); }
-      if (event.key.toLowerCase() === "n" && firstReady) { event.preventDefault(); startThread(); }
-    };
-    window.addEventListener("keydown", onShortcut);
-    return () => window.removeEventListener("keydown", onShortcut);
-  }, [chat.project, firstReady]);
-
-  useEffect(() => {
-    // Deliberately after first paint. Probing spawns child processes and an
-    // npm shim boots Node before it will answer, so doing this during startup
-    // would put seconds in front of an empty window (PROTOTYPE-1 criterion 1).
-    // The default model is read before the project, because restoring one
-    // opens a conversation and that conversation wants to arrive with a model
-    // already in the chip.
-    void initialise();
-    void loadDefaultChoice().then(restoreLastProject);
+    void initialise().then(() => loadDefaultChoice()).then(restoreLastProject);
     void loadAppearance();
     initialiseUpdates();
-
-    const unlisten = listen();
-    return () => {
-      void unlisten.then((stop) => stop());
-    };
+    const subscription = listen();
+    return () => { void subscription.then(stop => stop()); };
   }, []);
-
-  // The scan is deliberately slow -- it spawns a child process per CLI -- so a
-  // project restored at startup gets its conversation opened before anything
-  // is known to be able to run one, and the draft comes up with no model. This
-  // catches that the moment the scan lands.
+  // The agent scan is slow -- it starts each CLI -- so a project restored at
+  // launch can open before anything is known to run a conversation. Give its
+  // empty draft an agent the moment the scan lands.
   useEffect(() => {
-    if (!chat.project || chat.activeId !== null || chat.draft !== null) return;
-    if (firstReady === undefined) return;
+    if (!chat.project || chat.loading || chat.activeId !== null || chat.draft !== null || !canStart) return;
     newSession();
-  }, [chat.project, chat.activeId, chat.draft, firstReady]);
-
-  // WebView2 brings its own menu -- Back, Refresh, Save as, Print, Inspect --
-  // which is a browser talking about itself inside an app that is not a
-  // browser. Suppressed everywhere except text fields, where the one thing it
-  // offers that we do not is cut, copy and paste.
+  }, [chat.project, chat.loading, chat.activeId, chat.draft, canStart]);
   useEffect(() => {
-    const onMenu = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea")) return;
-      event.preventDefault();
+    const key = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key === "Escape" && narrowExpanded) { event.preventDefault(); setNarrowExpanded(false); return; }
+      if (event.key === "F2" && !typing(event.target) && active) { event.preventDefault(); setRenamingTitle(true); return; }
+      // Tabs: Ctrl+Tab / Ctrl+Shift+Tab move between them, Ctrl+W closes one.
+      if (event.ctrlKey && event.key === "Tab" && chat.project) {
+        event.preventDefault();
+        const next = cycleTabs(tabsFor(chat.project.id), event.shiftKey ? -1 : 1);
+        if (next === DRAFT) newSession(); else if (next && next !== chat.activeId) void openSession(next);
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === "w" && chat.project) {
+        event.preventDefault();
+        document.querySelector<HTMLButtonElement>(".tab.is-active .tab__close")?.click();
+        return;
+      }
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+      const letter = event.key.toLowerCase();
+      if (letter === "k") { event.preventDefault(); setSearchOpen(true); }
+      if (letter === "n" && !event.shiftKey) { event.preventDefault(); startChat(); }
+      if (letter === "o" && !event.shiftKey) { event.preventDefault(); addProject(); }
+      if (letter === "b") { event.preventDefault(); toggleSidebar(); }
+      if (event.key === "+" || event.key === "=") { event.preventDefault(); void nudgeZoom(1); }
+      if (event.key === "-") { event.preventDefault(); void nudgeZoom(-1); }
+      if (event.key === "0") { event.preventDefault(); void nudgeZoom(0); }
     };
-    document.addEventListener("contextmenu", onMenu);
-    return () => document.removeEventListener("contextmenu", onMenu);
-  }, []);
-
-  // Ctrl and plus, minus, or zero. Handled here rather than left to the
-  // webview's own hotkeys so the level is saved: the reason to change it is
-  // usually the monitor, and the monitor is still there next time.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || event.altKey) return;
-      // `=` is the unshifted key that carries `+` on most layouts, so both
-      // arrive here and both should zoom in. `NumpadAdd` reports as `+`.
-      const direction =
-        event.key === "+" || event.key === "="
-          ? 1
-          : event.key === "-" || event.key === "_"
-            ? -1
-            : event.key === "0"
-              ? 0
-              : null;
-      if (direction === null) return;
-      event.preventDefault();
-      void nudgeZoom(direction);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
-  return (
-    <div className={`workspace ${collapsed ? "workspace--collapsed" : ""}`}>
-      <WorkspaceSidebar collapsed={collapsed} activeView={settings ? "settings" : view}
-        onToggleCollapse={toggleSidebar} onHome={startThread} onThreads={() => setView("threads")}
-        onSearch={() => setSearchOpen(true)} onSettings={() => setSettings("appearance")}
-        onNewThread={startThread} onAddProject={() => { setView("chat"); void chooseProject(); }}
-        onOpenProject={(id) => { setView("chat"); void openById(id); }} onOpenSession={openThread}
-        onThreadDeleted={(id) => setTabs(previous => previous.filter(tab => tab.id !== id))} />
-      <div className="workspace__main">
-        <header className="workspace-tabs" data-tauri-drag-region>
-          {collapsed && <button className="icon-button" type="button" aria-label="Expand sidebar" title="Expand sidebar (Ctrl+B)" onClick={toggleSidebar}><Icon name="panel" /></button>}
-          <div className="workspace-tabs__list" aria-label="Open threads">
-            {tabs.map((tab) => <div key={tab.id} className={`workspace-tab ${view !== "threads" && chat.activeId === tab.id ? "workspace-tab--active" : ""}`}>
-              <button className="workspace-tab__select" type="button" onClick={() => openThread(tab.projectId, tab.id)} aria-current={view !== "threads" && chat.activeId === tab.id ? "page" : undefined}><Icon name="message" size={14} /><span>{tab.title}</span></button>
-              <button className="workspace-tab__close" type="button" aria-label={`Close tab ${tab.title}`} onClick={() => {
-                const remaining = tabs.filter(t => t.id !== tab.id);
-                setTabs(remaining);
-                if (tab.id === chat.activeId) {
-                  const next = remaining[remaining.length - 1];
-                  if (next) openThread(next.projectId, next.id); else startThread();
-                }
-              }}><Icon name="close" size={12} /></button>
-            </div>)}
-            {view === "threads" ? <div className="workspace-tab workspace-tab--active"><span className="workspace-tab__select"><Icon name="threads" size={14} />Threads</span></div>
-              : chat.activeId === null && <div className="workspace-tab workspace-tab--active"><span className="workspace-tab__select"><Icon name="sparkles" size={14} />New thread</span></div>}
-            <button className="icon-button workspace-tabs__new" type="button" disabled={!firstReady} aria-label="New thread" title="New thread (Ctrl+N)" onClick={startThread}><Icon name="plus" size={14} /></button>
-          </div>
-          <span className="workspace-tabs__drag" data-tauri-drag-region />
-          <WindowControls />
-        </header>
-        {view === "threads" ? <ThreadLibrary onOpenSession={openThread} onNewThread={startThread} /> : <ChatView onOpenSettings={() => setSettings("agents")} onNewThread={startThread} />}
-      </div>
-      {searchOpen && <SearchDialog onClose={() => setSearchOpen(false)} onOpenSession={(projectId, id) => { setSearchOpen(false); openThread(projectId, id); }} />}
-      {settings && <SettingsDialog section={settings} onSelect={setSettings} onClose={() => setSettings(null)} />}
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  });
+  return <div className={`workspace${sidebarCollapsed ? " workspace--collapsed" : ""}${narrow && narrowExpanded ? " workspace--sidebar-overlay" : ""}`}>
+    <WorkspaceSidebar collapsed={sidebarCollapsed} onToggleCollapse={toggleSidebar}
+      onSelectProject={id => { void openById(id); setNarrowExpanded(false); }}
+      onOpenSession={(projectId, sessionId) => { void openSessionAnywhere(projectId, sessionId); setNarrowExpanded(false); }}
+      onNewChat={startChat}
+      onAddProject={addProject}
+      onSearch={() => { setSearchOpen(true); setNarrowExpanded(false); }}
+      onSettings={() => { setSettings("appearance"); setNarrowExpanded(false); }} />
+    {narrow && narrowExpanded && <button type="button" className="ws-project-backdrop" aria-label="Close sidebar" onClick={() => setNarrowExpanded(false)} />}
+    <div className="workspace__main">
+      <header className="workspace-tabs" data-tauri-drag-region>
+        {sidebarCollapsed && <button type="button" className="icon-button workspace-tabs__sidebar" aria-label="Show sidebar" title="Show sidebar (Ctrl+B)" aria-keyshortcuts="Control+B" onClick={toggleSidebar}><Icon name="panel" size={16} /></button>}
+        {chat.project?.root
+          ? <TabBar onNewChat={() => startChat()} renameActive={renamingTitle} onRenameDone={() => setRenamingTitle(false)} />
+          : <strong className="workspace-title workspace-title--static">Kitty</strong>}
+        <span className="workspace-tabs__drag" data-tauri-drag-region />
+        {chat.project?.root && <>
+          <button type="button" className={`icon-button${detailsOpen ? " is-active" : ""}`} aria-label="Chat details" aria-expanded={detailsOpen} title="Chat details" onClick={() => setDetailsOpen(value => !value)}><Icon name="panelRight" size={16} /></button>
+        </>}
+        <WindowControls />
+      </header>
+      {chat.project?.root
+        ? <ChatView key={chat.project.id} detailsOpen={detailsOpen} onCloseDetails={() => setDetailsOpen(false)} onSwitchProject={id => startChat(id)} />
+        : <ProjectChooser onNewProject={addProject} onStartIn={id => startChat(id)} />}
+      <NoticeHost />
     </div>
-  );
+    {searchOpen && <SearchDialog onClose={() => setSearchOpen(false)} onOpenSession={(projectId, sessionId) => { setSearchOpen(false); void openSessionAnywhere(projectId, sessionId); }} />}
+    {settings && <SettingsDialog section={settings} onSelect={setSettings} onClose={() => setSettings(null)} />}
+  </div>;
 }

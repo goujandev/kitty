@@ -29,9 +29,25 @@ import {
   describeStop,
 } from "../ipc/bindings";
 import * as ipc from "../ipc/commands";
-import { refresh as refreshProjects } from "./projectStore";
+import { forgetProjectRow, patchChat, patchProject, refresh as refreshProjects, setChats, setExpanded, snapshot as projectSnapshot } from "./projectStore";
+import { showNotice } from "./noticeStore";
+import { nearbyAfterRemoval, splitChats } from "./sidebarModel";
+import { focusComposer } from "../views/focus";
+import { DRAFT, forgetProjectTabs, tabsFor } from "./tabStore";
 import { readyHarnesses } from "./harnessStore";
 import type { TurnTiming } from "../views/activity";
+import { isActivityEvent, ProjectActivityTracker, type ProjectActivity } from "./projectActivity";
+
+export type { ProjectActivity, ProjectActivityStatus } from "./projectActivity";
+
+function readUnreadActivity(): unknown {
+  try { return JSON.parse(localStorage.getItem("kitty.projectUnread") ?? "{}"); }
+  catch { return {}; }
+}
+const activity = new ProjectActivityTracker(readUnreadActivity());
+/** Activity for conversations not yet known to belong to a project. */
+const pendingActivity = new Map<string, TranscriptEvent[]>();
+let savedUnreadActivity = JSON.stringify(activity.unread());
 
 function readTimings(): Record<string, Record<number, TurnTiming>> {
   try { return JSON.parse(localStorage.getItem("kitty.turnTimings") ?? "{}"); }
@@ -40,6 +56,7 @@ function readTimings(): Record<string, Record<number, TurnTiming>> {
 const turnTimings = readTimings();
 const pendingStarts: Record<string, number> = {};
 const pendingEnds: Record<string, Pick<TurnTiming, "endedAt" | "outcome">> = {};
+const pendingApprovals = new Map<string, PendingApproval>();
 
 function saveTimings(): void {
   try { localStorage.setItem("kitty.turnTimings", JSON.stringify(turnTimings)); } catch { /* Storage may be unavailable. */ }
@@ -70,6 +87,7 @@ export interface ChatState {
   blocks: Block[];
   /** A turn is in flight. */
   busy: boolean;
+  approvalMode: ipc.ApprovalMode;
   startedAt: number | null;
   timings: Record<number, TurnTiming>;
   /** Short-lived progress text from the CLI. */
@@ -100,6 +118,10 @@ export interface ChatState {
    * activity without knowing which sessions live where.
    */
   running: Record<string, string>;
+  /** Conversations waiting on a permission answer, wherever they are. */
+  waiting: Record<string, true>;
+  /** Per-project badges for conversations working or finished in the background. */
+  projectActivity: Record<string, ProjectActivity>;
   /**
    * The agent is asking permission. The turn is stalled until this is
    * answered, so it is shown prominently rather than as a notification.
@@ -140,6 +162,7 @@ const EMPTY: ChatState = {
   draft: null,
   blocks: [],
   busy: false,
+  approvalMode: "auto",
   startedAt: null,
   timings: {},
   status: null,
@@ -148,6 +171,8 @@ const EMPTY: ChatState = {
   context: null,
   limits: {},
   running: {},
+  waiting: {},
+  projectActivity: activity.snapshot(),
   approval: null,
   catalogs: {},
   favourites: {},
@@ -163,7 +188,47 @@ const listeners = new Set<() => void>();
 
 function set(next: Partial<ChatState>): void {
   state = { ...state, ...next };
+  // The sidebar lists every project's chats from one place; the open
+  // project's list is this one.
+  if ("sessions" in next && state.project) setChats(state.project.id, state.sessions);
+  if ("project" in next || "activeId" in next || "loading" in next) {
+    activity.view(viewedProject());
+    updateActivityFields();
+  }
   for (const listener of listeners) listener();
+}
+
+function viewedProject(): string | null {
+  return state.activeId && !state.loading && document.visibilityState === "visible" && document.hasFocus()
+    ? state.project?.id ?? null : null;
+}
+
+function updateActivityFields(): boolean {
+  const projectActivity = activity.snapshot();
+  const running = activity.running();
+  const unread = JSON.stringify(activity.unread());
+  if (unread !== savedUnreadActivity) {
+    savedUnreadActivity = unread;
+    // This is a disposable read receipt, like scroll position and turn timing;
+    // session outcomes remain authoritative in Rust.
+    try { localStorage.setItem("kitty.projectUnread", unread); } catch { /* Storage may be unavailable. */ }
+  }
+  if (JSON.stringify(projectActivity) === JSON.stringify(state.projectActivity)
+    && JSON.stringify(running) === JSON.stringify(state.running)) return false;
+  state = { ...state, projectActivity, running };
+  return true;
+}
+
+function publishActivity(): void {
+  if (updateActivityFields()) for (const listener of listeners) listener();
+}
+
+function registerActivitySession(sessionId: string, projectId: string): void {
+  activity.register(sessionId, projectId);
+  const events = pendingActivity.get(sessionId);
+  if (!events) return;
+  pendingActivity.delete(sessionId);
+  activity.transcript(sessionId, events);
 }
 
 function subscribe(listener: () => void): () => void {
@@ -190,16 +255,27 @@ function message(error: unknown): string {
 
 // ------------------------------------------------------------------ actions
 
-export async function chooseProject(): Promise<void> {
+/**
+ * New project: pick a folder, then land in a fresh chat there.
+ *
+ * Cancelling the picker changes nothing. A folder that is already a project
+ * selects that project rather than adding a twin, and says so.
+ */
+export async function chooseProject(): Promise<boolean> {
   try {
     const path = await ipc.pickFolder();
-    if (!path) return;
-    await useProject(await ipc.openProject(path));
+    if (!path) return false;
+    const { project, created } = await ipc.openProject(path);
     // The rail is a separate store and has no idea this happened. Without
     // this a folder you just opened is not in the list of folders.
     await refreshProjects();
+    await useProject(project, true);
+    if (!created) showNotice({ tone: "info", message: `${project.name} is already in Kitty, so it was opened.` });
+    return true;
   } catch (error) {
-    set({ error: message(error) });
+    showNotice({ tone: "error", message: `Couldn't open that folder. ${message(error)}`, action: { label: "Try again", run: () => void chooseProject() } });
+    set({ loading: false });
+    return false;
   }
 }
 
@@ -215,14 +291,119 @@ export async function chooseProject(): Promise<void> {
  * So you get moved out of it, into a new chat with no folder -- which is the
  * one place that is always safe to land, because it depends on nothing.
  */
-export async function forgetProject(projectId: string): Promise<void> {
+export async function forgetProject(projectId: string): Promise<boolean> {
   const wasOpen = state.project?.id === projectId;
   try {
     await ipc.removeProject(projectId);
+    activity.forget(projectId);
+    publishActivity();
+    forgetProjectRow(projectId);
+    forgetProjectTabs(projectId);
+    setExpanded(projectId, false);
+    if (wasOpen) set({ project: null, sessions: [], activeId: null, blocks: [], draft: null, draftModel: null, busy: false, approval: null, loading: false, error: null, notice: null, status: null });
     await refreshProjects();
-    if (wasOpen) await newChat();
+    return true;
   } catch (error) {
-    set({ error: message(error) });
+    showNotice({ tone: "error", message: `Couldn't remove the project. ${message(error)}`, action: { label: "Try again", run: () => void forgetProject(projectId) } });
+    return false;
+  }
+}
+
+/** Renames a project in Kitty, showing the new name at once. */
+export async function renameProject(projectId: string, name: string): Promise<boolean> {
+  const before = projectSnapshot().projects.find(project => project.id === projectId)?.name;
+  patchProject(projectId, project => ({ ...project, name }));
+  if (state.project?.id === projectId) set({ project: { ...state.project, name } });
+  try {
+    const saved = await ipc.renameProject(projectId, name);
+    patchProject(projectId, project => ({ ...project, name: saved.name }));
+    if (state.project?.id === projectId) set({ project: { ...state.project, name: saved.name } });
+    return true;
+  } catch (error) {
+    if (before !== undefined) {
+      patchProject(projectId, project => ({ ...project, name: before }));
+      if (state.project?.id === projectId) set({ project: { ...state.project, name: before } });
+    }
+    showNotice({ tone: "error", message: `Couldn't rename the project. ${message(error)}`, action: { label: "Try again", run: () => void renameProject(projectId, name) } });
+    return false;
+  }
+}
+
+function chatsOf(projectId: string): SessionRow[] {
+  return state.project?.id === projectId ? state.sessions : projectSnapshot().chats[projectId] ?? [];
+}
+
+function replaceChat(projectId: string, id: string, update: (row: SessionRow) => SessionRow | null): void {
+  if (state.project?.id === projectId) {
+    set({ sessions: state.sessions.flatMap(row => {
+      if (row.id !== id) return [row];
+      const next = update(row);
+      return next ? [next] : [];
+    }) });
+  } else {
+    patchChat(projectId, id, update);
+  }
+}
+
+/**
+ * Moves off a chat that is leaving the list, to its neighbour.
+ *
+ * The chat below takes its place, or the one above; with none left the
+ * project opens a fresh draft rather than pointing at something gone.
+ * Returns the chat now selected, or null for the draft.
+ */
+async function leaveChat(projectId: string, sessionId: string, openIds: string[]): Promise<string | null> {
+  if (state.project?.id !== projectId || state.activeId !== sessionId) return state.activeId;
+  const next = nearbyAfterRemoval(openIds, sessionId);
+  if (next && next !== sessionId) {
+    await openSession(next);
+    return next;
+  }
+  newSession();
+  return null;
+}
+
+/** Renames a chat. The sidebar and heading change at once. */
+export async function renameChat(projectId: string, sessionId: string, title: string): Promise<boolean> {
+  const before = chatsOf(projectId).find(row => row.id === sessionId)?.title ?? null;
+  replaceChat(projectId, sessionId, row => ({ ...row, title }));
+  try {
+    const saved = await ipc.renameSession(sessionId, title);
+    replaceChat(projectId, sessionId, row => ({ ...row, title: saved.title }));
+    return true;
+  } catch (error) {
+    replaceChat(projectId, sessionId, row => ({ ...row, title: before }));
+    showNotice({ tone: "error", message: `Couldn't rename the chat. ${message(error)}`, action: { label: "Try again", run: () => void renameChat(projectId, sessionId, title) } });
+    return false;
+  }
+}
+
+/**
+ * Archives a chat, or restores one.
+ *
+ * Archiving the chat on screen moves to its neighbour. A short Undo follows,
+ * because archive is the reversible way to tidy up.
+ */
+export async function archiveChat(projectId: string, sessionId: string, archived: boolean): Promise<string | null | false> {
+  const rows = chatsOf(projectId);
+  const row = rows.find(entry => entry.id === sessionId);
+  const openIds = splitChats(rows).open.map(entry => entry.id);
+  replaceChat(projectId, sessionId, entry => ({ ...entry, archivedAt: archived ? Date.now() : null }));
+  try {
+    const saved = await ipc.archiveSession(sessionId, archived);
+    replaceChat(projectId, sessionId, () => saved);
+    const selected = archived ? await leaveChat(projectId, sessionId, openIds) : state.activeId;
+    const name = row?.title ?? "Chat";
+    if (archived) {
+      showNotice({ tone: "info", message: `Archived “${name}”.`, action: { label: "Undo", run: () => void archiveChat(projectId, sessionId, false) } });
+    } else {
+      showNotice({ tone: "info", message: `Restored “${name}”.` });
+    }
+    return selected;
+  } catch (error) {
+    replaceChat(projectId, sessionId, entry => ({ ...entry, archivedAt: row?.archivedAt ?? null }));
+    showNotice({ tone: "error", message: `Couldn't ${archived ? "archive" : "restore"} the chat. ${message(error)}`, action: { label: "Try again", run: () => void archiveChat(projectId, sessionId, archived) } });
+    return false;
   }
 }
 
@@ -233,7 +414,21 @@ export async function openById(projectId: string): Promise<void> {
     // Opening one moves it to the top, and the rail sorts by that.
     await refreshProjects();
   } catch (error) {
-    set({ error: message(error) });
+    set({ error: message(error), loading: false });
+  }
+}
+
+/** Opens a project directly into a draft without opening a saved thread first. */
+export async function newSessionInProject(projectId: string): Promise<void> {
+  if (state.project?.id === projectId) { newSession(); return; }
+  set({ loading: true });
+  try {
+    const project = await ipc.openStoredProject(projectId);
+    await useProject(project, true);
+    await refreshProjects();
+  } catch (error) {
+    set({ loading: false });
+    showNotice({ tone: "error", message: `Couldn't open that project. ${message(error)}`, action: { label: "Try again", run: () => void newSessionInProject(projectId) } });
   }
 }
 
@@ -251,7 +446,7 @@ export async function newChat(): Promise<void> {
     await useProject(project);
     await refreshProjects();
   } catch (error) {
-    set({ error: message(error) });
+    set({ error: message(error), loading: false });
   }
 }
 
@@ -264,15 +459,24 @@ export async function openSessionAnywhere(
   projectId: string,
   sessionId: string,
 ): Promise<void> {
+  set({ loading: true });
   try {
     if (state.project?.id !== projectId) {
       const project = (await ipc.listProjects()).find((p) => p.id === projectId);
-      if (!project) return;
+      if (!project) { set({ loading: false }); return; }
       // Deliberately not `useProject`: that would open the newest session, and
       // the point here is to open a specific one.
       set({
         project,
         error: null,
+        activeId: null,
+        blocks: [],
+        busy: false,
+        startedAt: null,
+        timings: {},
+        status: null,
+        notice: null,
+        runningModel: null,
         draft: null,
         draftModel: null,
         usage: null,
@@ -281,9 +485,10 @@ export async function openSessionAnywhere(
       });
       set({ sessions: await ipc.listSessions(projectId) });
     }
+    setExpanded(projectId, true);
     await openSession(sessionId);
   } catch (error) {
-    set({ error: message(error) });
+    set({ error: message(error), loading: false });
   }
 }
 
@@ -293,16 +498,21 @@ export async function restoreLastProject(): Promise<void> {
     // one that was asked for and walked away from, and restoring it would put
     // the user back in front of a box they already decided not to type into.
     await ipc.pruneChats("").catch(() => 0);
-    const projects = await ipc.listProjects();
-    if (projects.length > 0 && projects[0]) await useProject(projects[0]);
+    const projects = (await ipc.listProjects()).filter(project => project.root !== null);
+    if (projects[0]) await useProject(projects[0]);
   } catch (error) {
-    set({ error: message(error) });
+    set({ error: message(error), loading: false });
   }
 }
 
-async function useProject(project: Project): Promise<void> {
+/**
+ * Switches to a project and opens its most recent conversation, or a new one
+ * when it has none or `startFresh` asks for it.
+ */
+async function useProject(project: Project, startFresh = false): Promise<void> {
   set({
     project,
+    loading: true,
     error: null,
     sessions: [],
     activeId: null,
@@ -318,20 +528,25 @@ async function useProject(project: Project): Promise<void> {
   // clicking away from an empty one has to leave nothing behind.
   await ipc.pruneChats(project.id).catch(() => 0);
   const sessions = await ipc.listSessions(project.id);
+  if (state.project?.id !== project.id) return;
+  for (const session of sessions) registerActivitySession(session.id, project.id);
+  publishActivity();
   set({ sessions });
-  const first = sessions[0];
-  if (first) {
+  setExpanded(project.id, true);
+  // Back to the tab that was open last time; otherwise the newest chat still
+  // in the list. Archived chats are put away.
+  const remembered = tabsFor(project.id).active;
+  if (remembered === DRAFT && !startFresh) { newSession(); return; }
+  const open = splitChats(sessions).open;
+  const first = open.find(session => session.id === remembered) ?? open[0];
+  if (first && !startFresh) {
     await openSession(first.id);
     return;
   }
-  // A project with no folder holds exactly one conversation and has no rail
-  // beside it to start one from, so the draft is opened here and the box is
-  // ready to type into.
   // Nothing to open, so open the next one. A project with no conversations
   // and a box you cannot type into is a dead end you have to click out of.
   newSession();
 }
-
 /** Reads the saved default, for deciding what a new conversation opens with. */
 export async function loadDefaultChoice(): Promise<void> {
   try {
@@ -391,11 +606,19 @@ function opening(): { harness: HarnessId; model: string | null; effort: string |
  */
 export function newSession(): void {
   if (!state.project) return;
+  // Already looking at an unsent draft: that is the new chat. Starting over
+  // would throw away the agent and model just chosen for it.
+  if (state.draft !== null && state.activeId === null) {
+    focusComposer();
+    return;
+  }
   const start = opening();
 
   if (start) void loadModels(start.harness);
   set({
+    loading: false,
     draft: start?.harness ?? null,
+    approvalMode: "auto",
     draftModel:
       start?.model != null
         ? { model: start.model, effort: start.effort }
@@ -412,31 +635,31 @@ export function newSession(): void {
     approval: null,
     error: null,
   });
+  focusComposer();
 }
 
 /**
- * Forgets one conversation.
+ * Permanently deletes one chat from Kitty.
  *
- * If it was the one on screen, the next one in the project takes its place --
- * or the project is left empty rather than showing a transcript that is no
- * longer anywhere.
+ * If it was the one on screen, its neighbour takes its place -- or a fresh
+ * draft, rather than a transcript that is no longer anywhere. Returns the
+ * chat now selected (null for a draft), or false when the delete failed.
  */
-export async function removeSession(sessionId: string): Promise<boolean> {
+export async function deleteChat(projectId: string, sessionId: string): Promise<string | null | false> {
+  const rows = chatsOf(projectId);
+  const { open, archived } = splitChats(rows);
+  const ids = (open.some(row => row.id === sessionId) ? open : archived).map(row => row.id);
   try {
     await ipc.deleteSession(sessionId);
-    const left = state.sessions.filter((s) => s.id !== sessionId);
-    set({ sessions: left });
-
-    if (state.activeId !== sessionId) return true;
-    const next = left[0];
-    if (next) {
-      await openSession(next.id);
-      return true;
-    }
-    set({ activeId: null, blocks: [], busy: false, approval: null });
-    return true;
+    pendingApprovals.delete(sessionId);
+    delete turnTimings[sessionId];
+    saveTimings();
+    const selected = await leaveChat(projectId, sessionId, ids);
+    replaceChat(projectId, sessionId, () => null);
+    void refreshProjects();
+    return selected;
   } catch (error) {
-    set({ error: message(error) });
+    showNotice({ tone: "error", message: `Couldn't delete the chat. ${message(error)}`, action: { label: "Try again", run: () => void deleteChat(projectId, sessionId) } });
     return false;
   }
 }
@@ -445,6 +668,7 @@ export async function removeSession(sessionId: string): Promise<boolean> {
 export async function openSession(sessionId: string): Promise<void> {
   set({
     activeId: sessionId,
+    approvalMode: "auto",
     draft: null,
     draftModel: null,
     blocks: [],
@@ -455,26 +679,44 @@ export async function openSession(sessionId: string): Promise<void> {
     notice: null,
     usage: null,
     context: null,
-    approval: null,
+    approval: pendingApprovals.get(sessionId) ?? null,
     runningModel: null,
     error: null,
     loading: true,
   });
 
-  const harness = state.sessions.find((s) => s.id === sessionId)?.harness;
+  const row = state.sessions.find((s) => s.id === sessionId);
+  const harness = row?.harness;
   if (harness === "claude" || harness === "codex") void loadModels(harness);
 
   try {
     const blocks = await ipc.sessionBlocks(sessionId);
     // Guard against a slower load landing after the user moved on.
     if (state.activeId !== sessionId) return;
-    set({ blocks, loading: false });
-
-    await ipc.startSession(sessionId);
+    const approvalMode = await ipc.getApprovalMode(sessionId);
+    if (state.activeId !== sessionId) return;
+    set({ blocks, approvalMode });
+    // An archived chat is for reading; its agent starts if you write in it.
+    if (!row?.archivedAt) await ipc.startSession(sessionId);
+    if (state.activeId === sessionId) set({ loading: false });
   } catch (error) {
     if (state.activeId === sessionId) {
       set({ error: message(error), loading: false });
     }
+  }
+}
+
+export async function restartAgentContext(): Promise<void> {
+  const sessionId = state.activeId;
+  if (!sessionId || state.busy) return;
+  set({ loading: true, error: null, approval: null });
+  try {
+    await ipc.restartSessionThread(sessionId);
+    if (state.activeId === sessionId) {
+      set({ loading: false, notice: "Fresh agent context ready. Saved Kitty history remains; send your next request." });
+    }
+  } catch (error) {
+    if (state.activeId === sessionId) set({ loading: false, error: message(error) });
   }
 }
 
@@ -485,11 +727,14 @@ export async function send(text: string): Promise<void> {
   if (!trimmed) return;
 
   const startedAt = Date.now();
+  const projectId = state.project?.id;
+  const approvalMode = state.approvalMode;
+  let sessionId = state.activeId;
   set({ busy: true, startedAt, notice: null, error: null, status: null });
   try {
     // A draft becomes a real session here, on the first message and not
     // before.
-    const sessionId = state.activeId ?? (await commitDraft());
+    sessionId ??= await commitDraft();
     if (!sessionId) {
       set({ busy: false });
       return;
@@ -498,10 +743,16 @@ export async function send(text: string): Promise<void> {
     // Marked before the round trip, not after. A turn that finished first
     // would otherwise clear a flag that had not been set yet, and then the
     // flag would be set, and the row would spin for ever.
-    if (state.project) {
-      set({ running: { ...state.running, [sessionId]: state.project.id } });
+    if (projectId) {
+      registerActivitySession(sessionId, projectId);
+      activity.start(sessionId);
+      publishActivity();
     }
     pendingStarts[sessionId] = startedAt;
+    // Opening a project may have failed to launch its CLI, or the process may
+    // have exited since then. Ensure it is ready before accepting another turn.
+    await ipc.startSession(sessionId);
+    await ipc.setApprovalMode(sessionId, approvalMode);
     delete pendingEnds[sessionId];
     const seq = await ipc.sendTurn(sessionId, trimmed);
     const timings = turnTimings[sessionId] ?? {};
@@ -510,7 +761,7 @@ export async function send(text: string): Promise<void> {
     saveTimings();
     if (state.activeId === sessionId) set({ timings: turnTimings[sessionId] });
     // Show it immediately rather than waiting for a round trip.
-    appendLocalBlock({
+    if (state.activeId === sessionId) appendLocalBlock({
       seq,
       kind: "user",
       text: trimmed,
@@ -524,21 +775,14 @@ export async function send(text: string): Promise<void> {
     if (state.project?.root === null) void refreshProjects();
   } catch (error) {
     // The turn never started, so nothing is working on our behalf.
-    if (state.activeId) {
-      delete pendingStarts[state.activeId];
-      delete pendingEnds[state.activeId];
-      markIdle(state.activeId);
+    if (sessionId) {
+      delete pendingStarts[sessionId];
+      delete pendingEnds[sessionId];
+      activity.transcript(sessionId, [{ kind: "failed", errorKind: "process", message: message(error) }]);
+      publishActivity();
     }
-    set({ busy: false, error: message(error) });
+    if (state.activeId === sessionId) set({ busy: false, error: message(error) });
   }
-}
-
-/** Marks a conversation as no longer working. */
-function markIdle(sessionId: string): void {
-  if (!(sessionId in state.running)) return;
-  const running = { ...state.running };
-  delete running[sessionId];
-  set({ running });
 }
 
 /** Turns the chosen agent into a real session. Returns its id. */
@@ -547,6 +791,7 @@ async function commitDraft(): Promise<string | null> {
   if (!project || !draft) return null;
 
   const session = await ipc.createSession(project.id, draft);
+  registerActivitySession(session.id, project.id);
   set({
     activeId: session.id,
     draft: null,
@@ -567,6 +812,14 @@ async function commitDraft(): Promise<string | null> {
 
   await ipc.startSession(session.id);
   return session.id;
+}
+
+export async function chooseApprovalMode(mode: ipc.ApprovalMode): Promise<void> {
+  const id = state.activeId;
+  try {
+    if (id) await ipc.setApprovalMode(id, mode);
+    if (state.activeId === id) set({ approvalMode: mode });
+  } catch (error) { set({ error: message(error) }); }
 }
 
 export async function cancel(): Promise<void> {
@@ -593,7 +846,10 @@ async function refreshSessions(): Promise<void> {
   const { project } = state;
   if (!project) return;
   try {
-    set({ sessions: await ipc.listSessions(project.id) });
+    const sessions = await ipc.listSessions(project.id);
+    for (const session of sessions) registerActivitySession(session.id, project.id);
+    publishActivity();
+    if (state.project?.id === project.id) set({ sessions });
   } catch {
     // A stale session list is not worth an error banner.
   }
@@ -634,6 +890,28 @@ export function agentName(): string {
     : models?.find((m) => m.isDefault);
 
   return entry?.displayName ?? model ?? state.runningModel ?? HARNESS_LABEL[harness];
+}
+
+/**
+ * A chat's model, as a short name for lists: "Fable 5" rather than "Claude
+ * Fable 5", since the provider's mark sits beside it. Falls back to the id the
+ * CLI uses, then to the provider's recommended model.
+ */
+export function modelLabel(row: Pick<SessionRow, "harness" | "model">): string {
+  const models = state.catalogs[row.harness]?.models;
+  const entry = row.model ? models?.find(m => m.id === row.model) : models?.find(m => m.isDefault);
+  const name = entry?.displayName ?? row.model ?? HARNESS_LABEL[row.harness];
+  return name.replace(/^Claude\s+/i, "");
+}
+
+/** Fetches the model lists a set of chats needs to name their models. */
+const requestedCatalogs = new Set<HarnessId>();
+export function ensureCatalogs(harnesses: Iterable<HarnessId>): void {
+  for (const harness of new Set(harnesses)) {
+    if (state.catalogs[harness] || requestedCatalogs.has(harness)) continue;
+    requestedCatalogs.add(harness);
+    void loadModels(harness);
+  }
 }
 
 /** The model choice in force, from the session or the pending draft. */
@@ -857,16 +1135,29 @@ function apply(event: TranscriptEvent): void {
 
 /** Starts listening for transcript batches. Call once, at startup. */
 export async function listen(): Promise<() => void> {
-  return ipc.onTranscript((batch: TranscriptBatch) => {
+  const stopTranscript = await ipc.onTranscript((batch: TranscriptBatch) => {
+    const events = batch.events.filter(isActivityEvent);
+    if (events.length) {
+      activity.view(viewedProject());
+      if (activity.projectFor(batch.sessionId)) activity.transcript(batch.sessionId, events);
+      else pendingActivity.set(batch.sessionId, [...(pendingActivity.get(batch.sessionId) ?? []), ...events]);
+      publishActivity();
+    }
     // Whether a turn has finished is read from every batch, not just the open
     // conversation's: the rails show which conversations are working, and one
     // you are not looking at is exactly the case that needs saying.
     for (const event of batch.events) {
+      if (event.kind === "approvalRequested") {
+        pendingApprovals.set(batch.sessionId, { id: event.id, approvalKind: event.approvalKind, title: event.title, detail: event.detail });
+      } else if (event.kind === "approvalResolved" && pendingApprovals.get(batch.sessionId)?.id === event.id) {
+        pendingApprovals.delete(batch.sessionId);
+      }
       if (event.kind === "blockAppended" && event.blockKind === "user") {
         const timings = turnTimings[batch.sessionId] ?? {};
         turnTimings[batch.sessionId] = { ...timings, [event.seq]: { startedAt: pendingStarts[batch.sessionId] ?? Date.now() } };
       }
       if (event.kind === "turnEnded" || event.kind === "failed") {
+        pendingApprovals.delete(batch.sessionId);
         const timings = turnTimings[batch.sessionId] ?? {};
         const seq = Math.max(-1, ...Object.keys(timings).map(Number).filter(seq => timings[seq]?.endedAt === undefined));
         const ending: Pick<TurnTiming, "endedAt" | "outcome"> = {
@@ -880,16 +1171,42 @@ export async function listen(): Promise<() => void> {
           saveTimings();
         } else if (batch.sessionId in pendingStarts) pendingEnds[batch.sessionId] = ending;
         delete pendingStarts[batch.sessionId];
-        markIdle(batch.sessionId);
       }
+    }
+    const waiting = pendingApprovals.has(batch.sessionId);
+    if (waiting !== batch.sessionId in state.waiting) {
+      const { [batch.sessionId]: _was, ...rest } = state.waiting;
+      set({ waiting: waiting ? { ...rest, [batch.sessionId]: true } : rest });
     }
     // The transcript itself is only rebuilt for the one on screen.
     if (batch.sessionId !== state.activeId) return;
     set({ timings: turnTimings[batch.sessionId] ?? {} });
     for (const event of batch.events) apply(event);
   });
+  // The agent-written title replaces the first-line one wherever it shows.
+  const stopTitles = await ipc.onSessionTitle(update => replaceChat(update.projectId, update.sessionId, row => ({ ...row, title: update.title })));
+  let disposed = false;
+  const visibility = () => { activity.view(viewedProject()); publishActivity(); };
+  document.addEventListener("visibilitychange", visibility);
+  window.addEventListener("focus", visibility);
+  window.addEventListener("blur", visibility);
+  // Subscribe before reading, so activity in any project reaches its badge
+  // even before that project is opened. Reading history never invents a result.
+  void ipc.listProjects().then(projects => Promise.all(projects.map(async project => {
+    const sessions = await ipc.listSessions(project.id);
+    if (disposed) return;
+    for (const session of sessions) registerActivitySession(session.id, project.id);
+    publishActivity();
+  }))).catch(() => { /* Opening a project registers its own conversations. */ });
+  return () => {
+    disposed = true;
+    stopTranscript();
+    stopTitles();
+    document.removeEventListener("visibilitychange", visibility);
+    window.removeEventListener("focus", visibility);
+    window.removeEventListener("blur", visibility);
+  };
 }
-
 // ---------------------------------------------------------------- hot reload
 
 /**

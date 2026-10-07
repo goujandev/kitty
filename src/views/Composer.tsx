@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Icon } from "./Icon";
 
-// Drafts stay in memory while the reader moves between workspace tabs.
+// Drafts stay in memory while the reader moves between projects.
 const drafts = new Map<string, string>();
 const consumedSuggestions = new Map<string, number>();
 
@@ -20,10 +21,12 @@ export function Composer({
   disabled,
   placeholder,
   tools,
+  context,
   onSend,
   onCancel,
   suggestion,
   storageKey,
+  label = "Message",
 }: {
   busy: boolean;
   disabled: boolean;
@@ -31,10 +34,13 @@ export function Composer({
   placeholder?: string;
   /** Controls shown along the bottom of the box. */
   tools?: React.ReactNode;
+  /** Working folder and usage, in the source composer's attached lower strip. */
+  context?: React.ReactNode;
   onSend: (text: string) => void;
   onCancel: () => void;
   suggestion?: { text: string; id: number } | null;
   storageKey: string;
+  label?: string;
 }): React.ReactElement {
   const [text, setText] = useState(() => drafts.get(storageKey) ?? "");
   const box = useRef<HTMLTextAreaElement>(null);
@@ -77,20 +83,24 @@ export function Composer({
 
   return (
     <div className="composer">
-      <div className={`composer__box ${disabled ? "composer__box--off" : ""}`}>
+      {context && <div className="composer__context" data-slot="composer-context">{context}</div>}
+      <div className={`composer__box ${disabled ? "composer__box--off" : ""}`} data-slot="composer-host">
+        <div className="composer__body" data-chat-composer-body="true">
         <textarea
           ref={box}
           className="composer__input"
           rows={1}
+          aria-label={label}
           value={text}
           disabled={disabled}
           placeholder={
             disabled
               ? placeholder ?? "Not ready yet"
-              : "Ask Kitty to build, fix, or explore…"
+              : "Ask anything"
           }
           onChange={(event) => updateText(event.target.value)}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
               submit();
@@ -103,9 +113,9 @@ export function Composer({
           }}
         />
 
-        <div className="composer__tools">
-          {tools}
-          <span className="composer__gap" />
+        </div>
+        <div className="composer__tools" data-chat-composer-footer="true">
+          <div className="composer__choices">{tools}</div>
           {busy ? (
             <button
               type="button"
@@ -127,18 +137,10 @@ export function Composer({
               disabled={disabled || !text.trim()}
               onClick={submit}
             >
-              <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-                <path
-                  d="M7 12V2.6M7 2.6 3 6.6M7 2.6l4 4"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
+              <Icon name="arrow" size={16} />
             </button>
           )}
+
         </div>
       </div>
     </div>

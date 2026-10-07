@@ -24,15 +24,28 @@ pub use kitty_core::BlockKind;
 
 #[derive(Debug)]
 pub enum StoreError {
-    Open { message: String },
-    Query { message: String },
-    Missing { what: String },
+    Open {
+        message: String,
+    },
+    Query {
+        message: String,
+    },
+    Missing {
+        what: String,
+    },
+    /// The request itself was refused, e.g. an empty name. The message is
+    /// written for the person who made it.
+    Invalid {
+        message: String,
+    },
 }
 
 impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Open { message } | Self::Query { message } => f.write_str(message),
+            Self::Open { message } | Self::Query { message } | Self::Invalid { message } => {
+                f.write_str(message)
+            }
             Self::Missing { what } => write!(f, "{what} does not exist"),
         }
     }
@@ -76,7 +89,84 @@ pub struct SessionRow {
     pub title: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// When the chat was archived, or None while it is in the list. Kitty's
+    /// own filing; the provider's session is untouched either way.
+    pub archived_at: Option<i64>,
 }
+
+/// The longest name kept for a chat or project. Longer input is cut, not
+/// refused: a pasted paragraph is still a usable name once shortened.
+const NAME_LIMIT: usize = 120;
+
+/// Collapses whitespace and trims a user-supplied name, refusing an empty one.
+fn clean_name(text: &str, what: &str) -> Result<String> {
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return Err(StoreError::Invalid {
+            message: format!("A {what} name can't be empty"),
+        });
+    }
+    Ok(collapsed.chars().take(NAME_LIMIT).collect())
+}
+
+/// A readable title from the first message of a chat.
+///
+/// The first line that says anything, with markdown punctuation and runs of
+/// whitespace removed, cut at a word boundary. Not a summary -- just the
+/// sentence the user opened with, short enough to scan in a list.
+#[must_use]
+pub fn derive_title(text: &str) -> String {
+    const LIMIT: usize = 60;
+    let mut fenced = false;
+    let line = text
+        .lines()
+        .filter(|line| {
+            // Code is rarely what a conversation is about; the prose is.
+            if line.trim_start().starts_with("```") {
+                fenced = !fenced;
+                return false;
+            }
+            !fenced
+        })
+        .map(|line| {
+            line.trim_start_matches(['#', '>', '-', '*', ' ', '\t'])
+                .trim()
+        })
+        .find(|line| !line.is_empty())
+        .unwrap_or("");
+    let words = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if words.chars().count() <= LIMIT {
+        return words;
+    }
+    let cut: String = words.chars().take(LIMIT).collect();
+    let at_word = cut
+        .rfind(' ')
+        .filter(|i| *i > LIMIT / 2)
+        .map_or(cut.as_str(), |i| &cut[..i]);
+    format!("{}…", at_word.trim_end_matches([',', '.', ';', ':', ' ']))
+}
+
+/// How two spellings of one folder are recognised as the same project.
+///
+/// Windows paths are case-insensitive and accept either slash; a trailing
+/// separator and the `\\?\` verbatim prefix name the same folder too.
+fn folder_key(root: &str) -> String {
+    let plain = root.strip_prefix(r"\\?\").unwrap_or(root);
+    let mut key = if cfg!(windows) {
+        plain.replace('/', "\\").to_lowercase()
+    } else {
+        plain.to_owned()
+    };
+    let separator = if cfg!(windows) { '\\' } else { '/' };
+    while key.len() > 1 && key.ends_with(separator) && !key.ends_with(":\\") {
+        key.pop();
+    }
+    key
+}
+
+/// The columns `session_from_row` reads, in order.
+const SESSION_COLUMNS: &str = "id, project_id, harness, model, effort, provider_session, title,
+     created_at, updated_at, archived_at";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -186,25 +276,81 @@ impl Store {
 
     /// Finds or creates the project for a directory, and marks it opened.
     pub fn open_project(&self, root: &Path) -> Result<Project> {
+        self.add_project(root).map(|(project, _)| project)
+    }
+
+    /// The same, also saying whether the project is new.
+    ///
+    /// A folder already in the list is recognised however it is spelled --
+    /// case, slash direction, a trailing separator -- so adding it again
+    /// selects the existing project rather than creating a twin.
+    pub fn add_project(&self, root: &Path) -> Result<(Project, bool)> {
         let root_text = root.to_string_lossy().into_owned();
+        let key = folder_key(&root_text);
         let name = root
             .file_name()
             .map_or_else(|| root_text.clone(), |n| n.to_string_lossy().into_owned());
         let now = now_ms();
 
         self.write(|conn| {
-            conn.execute(
-                "INSERT INTO projects (id, root, name, created_at, last_opened_at, sort_order)
-                 VALUES (?1, ?2, ?3, ?4, ?4, ?4)
-                 ON CONFLICT(root) DO UPDATE SET last_opened_at = ?4",
-                params![new_id(), root_text, name, now],
-            )?;
+            let existing = {
+                let mut stmt =
+                    conn.prepare("SELECT id, root FROM projects WHERE root IS NOT NULL")?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                rows.into_iter()
+                    .find(|(_, root)| folder_key(root) == key)
+                    .map(|(id, _)| id)
+            };
+            let created = existing.is_none();
+            let id = if let Some(id) = existing {
+                conn.execute(
+                    "UPDATE projects SET last_opened_at = ?2 WHERE id = ?1",
+                    params![id, now],
+                )?;
+                id
+            } else {
+                let id = new_id();
+                let stored = root_text
+                    .strip_prefix(r"\\?\")
+                    .unwrap_or(&root_text)
+                    .to_owned();
+                conn.execute(
+                    "INSERT INTO projects (id, root, name, created_at, last_opened_at, sort_order)
+                     VALUES (?1, ?2, ?3, ?4, ?4, ?4)",
+                    params![id, stored, name, now],
+                )?;
+                id
+            };
             let project = conn.query_row(
-                "SELECT id, root, name, created_at, last_opened_at FROM projects WHERE root = ?1",
-                params![root_text],
+                "SELECT id, root, name, created_at, last_opened_at FROM projects WHERE id = ?1",
+                params![id],
                 project_from_row,
             )?;
-            Ok(project)
+            Ok((project, created))
+        })
+    }
+
+    /// Renames a project in Kitty. The folder on disk keeps its name.
+    pub fn rename_project(&self, project_id: &str, name: &str) -> Result<Project> {
+        let name = clean_name(name, "project")?;
+        self.write(|conn| {
+            conn.execute(
+                "UPDATE projects SET name = ?2 WHERE id = ?1",
+                params![project_id, name],
+            )?;
+            conn.query_row(
+                "SELECT id, root, name, created_at, last_opened_at FROM projects WHERE id = ?1",
+                params![project_id],
+                project_from_row,
+            )
+            .optional()?
+            .ok_or_else(|| StoreError::Missing {
+                what: format!("project {project_id}"),
+            })
         })
     }
 
@@ -353,9 +499,7 @@ impl Store {
     pub fn session(&self, id: &str) -> Result<SessionRow> {
         self.read(|conn| {
             conn.query_row(
-                "SELECT id, project_id, harness, model, effort, provider_session, title,
-                        created_at, updated_at
-                 FROM sessions WHERE id = ?1",
+                &format!("SELECT {SESSION_COLUMNS} FROM sessions WHERE id = ?1"),
                 params![id],
                 session_from_row,
             )
@@ -368,17 +512,60 @@ impl Store {
 
     pub fn list_sessions(&self, project_id: &str) -> Result<Vec<SessionRow>> {
         self.read(|conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, project_id, harness, model, effort, provider_session, title,
-                        created_at, updated_at
-                 FROM sessions WHERE project_id = ?1
-                  ORDER BY sort_order DESC, created_at DESC",
-            )?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {SESSION_COLUMNS} FROM sessions WHERE project_id = ?1
+                  ORDER BY sort_order DESC, created_at DESC"
+            ))?;
             let rows = stmt
                 .query_map(params![project_id], session_from_row)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })
+    }
+
+    /// Renames a chat. The title is Kitty's; no provider is told.
+    pub fn rename_session(&self, session_id: &str, title: &str) -> Result<SessionRow> {
+        let title = clean_name(title, "chat")?;
+        self.write(|conn| {
+            conn.execute(
+                "UPDATE sessions SET title = ?2 WHERE id = ?1",
+                params![session_id, title],
+            )?;
+            Ok(())
+        })?;
+        self.session(session_id)
+    }
+
+    /// Replaces a chat's title only if it is still `expected`.
+    ///
+    /// For the agent-written title, which arrives seconds after the first
+    /// message: if the user renamed the chat in the meantime, their name wins.
+    /// Returns whether the title changed.
+    pub fn replace_title_if(&self, session_id: &str, expected: &str, title: &str) -> Result<bool> {
+        let title = clean_name(title, "chat")?;
+        self.write(|conn| {
+            let changed = conn.execute(
+                "UPDATE sessions SET title = ?3 WHERE id = ?1 AND title = ?2",
+                params![session_id, expected, title],
+            )?;
+            Ok(changed > 0)
+        })
+    }
+
+    /// Files a chat away, or brings it back.
+    ///
+    /// Only Kitty's list changes. The transcript and the provider's session id
+    /// are kept, so a restored chat carries on where it stopped.
+    pub fn set_session_archived(&self, session_id: &str, archived: bool) -> Result<SessionRow> {
+        self.write(|conn| {
+            conn.execute(
+                "UPDATE sessions SET archived_at = CASE WHEN ?2 THEN ?3 ELSE NULL END
+                 WHERE id = ?1",
+                params![session_id, archived, now_ms()],
+            )?;
+            Ok(())
+        })?;
+        self.session(session_id)
     }
 
     /// Records the vendor's own session id, which is what resume needs.
@@ -425,10 +612,10 @@ impl Store {
         })
     }
 
-    /// The first user message makes a serviceable title until slice 4 asks a
-    /// model for a better one.
+    /// Titles a chat from its first message, unless it already has a title --
+    /// one the user chose is never replaced.
     pub fn set_title_if_unset(&self, session_id: &str, title: &str) -> Result<()> {
-        let trimmed: String = title.trim().chars().take(80).collect();
+        let trimmed = derive_title(title);
         if trimmed.is_empty() {
             return Ok(());
         }
@@ -724,5 +911,6 @@ fn session_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         title: row.get(6)?,
         created_at: row.get(7)?,
         updated_at: row.get(8)?,
+        archived_at: row.get(9)?,
     })
 }

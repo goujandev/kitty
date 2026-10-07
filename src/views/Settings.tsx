@@ -18,6 +18,8 @@ import { ModelTools } from "./ModelPicker";
 import { WindowControls } from "./WindowControls";
 import { Icon } from "./Icon";
 import { UpdateSettings } from "./UpdateSettings";
+import t3License from "../../docs/licenses/T3-Code-MIT.txt?raw";
+import lucideLicense from "../../docs/licenses/Lucide-LICENSE.txt?raw";
 
 /**
  * Settings.
@@ -49,7 +51,7 @@ export function SettingsDialog({ section, onSelect, onClose }: {
     <div className="settings-dialog" ref={panel} role="dialog" aria-modal="true" aria-labelledby="settings-title" onKeyDown={event => {
       if (event.key === "Escape" && !panel.current?.querySelector(".pop__menu")) { event.preventDefault(); onClose(); }
       if (event.key !== "Tab") return;
-      const controls = [...(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]') ?? [])].filter(element => element.offsetParent !== null);
+      const controls = [...(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), summary, [tabindex="0"]') ?? [])].filter(element => element.offsetParent !== null);
       const first = controls[0]; const last = controls[controls.length - 1];
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
@@ -59,7 +61,7 @@ export function SettingsDialog({ section, onSelect, onClose }: {
         <nav className="settings-dialog__nav" aria-label="Settings sections">
           {SECTIONS.map(entry => <button type="button" key={entry.id} className={entry.id === section ? "is-active" : ""} aria-current={entry.id === section ? "page" : undefined} onClick={() => onSelect(entry.id)}><Icon name={entry.id === "appearance" ? "panel" : entry.id === "updates" ? "arrow" : "sparkles"} />{entry.name}</button>)}
         </nav>
-        <div className="settings-dialog__content"><h3>{SECTIONS.find(entry => entry.id === section)?.name}</h3>{section === "agents" ? <AgentSettings /> : section === "updates" ? <UpdateSettings /> : <AppearanceSettings />}</div>
+        <div className="settings-dialog__content"><h3>{SECTIONS.find(entry => entry.id === section)?.name}</h3>{section === "agents" ? <AgentSettings /> : section === "updates" ? <UpdateSettings /> : <AppearanceSettings />}<details className="settings-credits"><summary>Open-source credits</summary><p>Interface elements adapted from T3 Code.</p><pre>{t3License}</pre><p>Lucide icons</p><pre>{lucideLicense}</pre></details></div>
       </div>
     </div>
   </div>;
@@ -211,7 +213,7 @@ function AppearanceSettings(): React.ReactElement {
 
         <h2 className="settings__heading">Theme</h2>
         <div className="themes">
-          {(["system", "light", "dark"] as Theme[]).map((option) => (
+          {(["system", "light", "dark", "nord", "catppuccin-mocha", "solarized-light"] as Theme[]).map((option) => (
             <button
               key={option}
               type="button"
@@ -220,7 +222,7 @@ function AppearanceSettings(): React.ReactElement {
             >
               <ThemeSwatch theme={option} />
               <span className="theme__name">
-                {option.charAt(0).toUpperCase() + option.slice(1)}
+                {{ system: "System", light: "Light", dark: "Dark", nord: "Nord", "catppuccin-mocha": "Catppuccin Mocha", "solarized-light": "Solarized Light" }[option]}
               </span>
             </button>
           ))}

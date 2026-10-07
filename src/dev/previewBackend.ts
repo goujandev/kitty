@@ -1,0 +1,263 @@
+/**
+ * A pretend host, so the real interface runs in an ordinary browser.
+ *
+ * Development only: `main.tsx` installs this when Vite is serving and there
+ * is no Tauri, and production builds never import it. It answers every
+ * command the app sends from an in-memory copy of a few projects and chats,
+ * streams a short made-up reply to anything sent, and keeps a wallpaper so
+ * the look can be reviewed and adjusted in seconds rather than rebuilt.
+ *
+ * Nothing here talks to a real agent or touches a real file.
+ */
+
+type Row = Record<string, unknown>;
+type Handler = (event: { event: string; id: number; payload: unknown }) => void;
+
+const now = Date.now();
+const minutes = (n: number) => now - n * 60_000;
+
+const projects: Row[] = [
+  { id: "kitty", name: "kitty", root: "C:\\GitHub\\kitty", createdAt: minutes(9000), lastOpenedAt: minutes(5), sortOrder: 3 },
+  { id: "spyder", name: "spyder", root: "C:\\GitHub\\spyder", createdAt: minutes(8000), lastOpenedAt: minutes(60), sortOrder: 2 },
+  { id: "site", name: "personal-website", root: "C:\\GitHub\\personal-website", createdAt: minutes(7000), lastOpenedAt: minutes(600), sortOrder: 1 },
+];
+
+let sessionNumber = 0;
+const session = (projectId: string, title: string | null, harness: "codex" | "claude", age: number, archivedAt: number | null = null): Row => ({
+  id: `s${++sessionNumber}`, projectId, title, harness,
+  model: harness === "codex" ? "gpt-6.1-sol" : "fable-5", effort: "high",
+  providerSession: null, createdAt: minutes(age), updatedAt: minutes(age), archivedAt, sortOrder: -age,
+});
+
+const sessions: Row[] = [
+  session("kitty", "Redesign the sidebar for projects and chats", "claude", 12),
+  session("kitty", "Why does the transcript jump when streaming?", "codex", 95),
+  session("kitty", "Add a Nord theme", "claude", 1400),
+  session("kitty", "Old experiment with tabs", "codex", 9000, minutes(4000)),
+  session("spyder", "Add Pinterest and Reddit downloads", "codex", 50),
+  session("spyder", "Fix the progress bar on large files", "claude", 2000),
+  session("site", "Plush Kitty section on the homepage", "claude", 3000),
+];
+
+const blocks: Record<string, Row[]> = {};
+const block = (seq: number, kind: string, text: string, meta: string | null = null): Row => ({ seq, kind, text, meta, createdAt: minutes(10) });
+for (const row of sessions) {
+  const id = row.id as string;
+  blocks[id] = [
+    block(0, "user", String(row.title)),
+    block(1, "tool", "Read src/views/WorkspaceSidebar.tsx", JSON.stringify({ status: "ok", detail: "148 lines" })),
+    block(2, "assistant", "Here is the plan:\n\n1. **Group chats under their project** so the hierarchy is obvious.\n2. Give every row a `⋯` menu with *Rename*, *Archive* and *Delete*.\n3. Keep destructive actions last, behind a confirmation.\n\nI've made the first two changes; the third needs your call on wording."),
+  ];
+}
+
+const models = {
+  codex: { harness: "codex", cliVersion: "1.0.0", fetchedAtMs: now, models: [
+    { id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", description: "Most capable", efforts: ["low", "medium", "high"], defaultEffort: "medium", isDefault: true },
+    { id: "gpt-6.1-mini", displayName: "GPT-6.1 Mini", description: "Fast", efforts: ["low", "medium"], defaultEffort: "low", isDefault: false },
+  ] },
+  claude: { harness: "claude", cliVersion: "2.0.0", fetchedAtMs: now, models: [
+    { id: "fable-5", displayName: "Claude Fable 5", description: "Best for everyday, complex tasks", efforts: ["low", "medium", "high"], defaultEffort: "high", isDefault: true },
+    { id: "opus-5-5", displayName: "Claude Opus 5.5", description: "Deepest reasoning", efforts: ["low", "medium", "high"], defaultEffort: "high", isDefault: false },
+  ] },
+};
+const found = { kind: "found", path: "cli", version: { major: 1, minor: 0, patch: 0 } };
+const harness = (id: string, label: string, vendor: string) => ({ id, label, vendor, install: found, login: { kind: "loggedIn", plan: null, expiresAtMs: null }, ready: true, hint: null, verifiedVersion: found.version, newerThanVerified: false, checkedAtMs: now });
+const scan = { harnesses: [harness("claude", "Claude Code", "Anthropic"), harness("codex", "Codex", "OpenAI")], durationMs: 1, pathDirs: 1 };
+
+// ------------------------------------------------------------------ wallpaper
+
+const WALLPAPER_KEY = "kitty.preview.wallpaper";
+/** A copy of the real wallpaper, if one was put here (gitignored). */
+const LOCAL_WALLPAPER = "/preview-local/background.jpg";
+
+async function wallpaper(): Promise<string | null> {
+  try {
+    const saved = localStorage.getItem(WALLPAPER_KEY);
+    if (saved === "none") return null;
+    if (saved) return saved;
+  } catch { /* Storage may be unavailable. */ }
+  try {
+    const response = await fetch(LOCAL_WALLPAPER, { method: "HEAD" });
+    if (response.ok && (response.headers.get("content-type") ?? "").startsWith("image/")) return LOCAL_WALLPAPER;
+  } catch { /* No local copy. */ }
+  return null;
+}
+
+/** The browser's own file picker, standing in for the native one. */
+function pickImage(): Promise<string | null> {
+  return new Promise(resolve => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (!file) { resolve(null); return; }
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+    input.addEventListener("cancel", () => resolve(null));
+    input.click();
+  });
+}
+
+// -------------------------------------------------------------------- events
+
+const callbacks = new Map<number, Handler>();
+const listeners = new Map<string, number[]>();
+let nextCallback = 1;
+
+function emit(sessionId: string, events: Row[]): void {
+  for (const id of listeners.get("kitty://transcript") ?? []) {
+    callbacks.get(id)?.({ event: "kitty://transcript", id, payload: { sessionId, events } });
+  }
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/** A short, plausible reply, streamed the way the host batches one. */
+async function reply(sessionId: string, text: string): Promise<void> {
+  const rows = blocks[sessionId]!;
+  const tool = rows.length;
+  await sleep(400);
+  rows.push(block(tool, "tool", "Search the project", JSON.stringify({ status: "running", detail: null })));
+  emit(sessionId, [{ kind: "blockAppended", seq: tool, blockKind: "tool", text: "Search the project" }]);
+  await sleep(700);
+  emit(sessionId, [{ kind: "toolStatusChanged", seq: tool, status: "ok", detail: "12 matches" }]);
+  const seq = rows.length;
+  const answer = `This is the **preview**, so no agent is running. You said:\n\n> ${text.split("\n")[0]}\n\nIn the real app the reply streams in here, word by word.`;
+  rows.push(block(seq, "assistant", ""));
+  emit(sessionId, [{ kind: "blockAppended", seq, blockKind: "assistant", text: "" }]);
+  for (const word of answer.split(/(?<= )/)) {
+    await sleep(25);
+    emit(sessionId, [{ kind: "blockDelta", seq, text: word }]);
+  }
+  rows[seq] = { ...rows[seq], text: answer };
+  emit(sessionId, [{ kind: "blockFinal", seq, text: answer }, { kind: "turnEnded", stop: { kind: "endTurn" } }]);
+}
+
+// ------------------------------------------------------------------ commands
+
+const sorted = (rows: Row[]) => [...rows].sort((a, b) => Number(b.sortOrder) - Number(a.sortOrder));
+const summary = (project: Row) => ({ ...project, sessionCount: sessions.filter(row => row.projectId === project.id).length, exists: true });
+const named = (text: unknown, what: string) => {
+  const value = String(text).split(/\s+/).filter(Boolean).join(" ");
+  if (!value) throw `could not rename that ${what}: A ${what} name can't be empty`;
+  return value;
+};
+const settings = { theme: "dark", zoom: 1, approval: new Map<string, string>(), choice: { harness: "claude", model: "fable-5", effort: "high" } };
+
+async function command(cmd: string, args: Record<string, unknown>): Promise<unknown> {
+  switch (cmd) {
+    case "plugin:event|listen": {
+      const event = String(args.event);
+      listeners.set(event, [...(listeners.get(event) ?? []), Number(args.handler)]);
+      return args.handler;
+    }
+    case "plugin:event|unlisten": return null;
+    case "plugin:app|version": return "0.1.2-preview";
+    case "harness_snapshot": case "harness_rescan": return scan;
+    case "theme": return settings.theme;
+    case "set_theme": settings.theme = String(args.theme); return null;
+    case "zoom": return settings.zoom;
+    case "set_zoom": settings.zoom = Number(args.factor); return settings.zoom;
+    case "rail_widths": return { projects: 256, chats: 260 };
+    case "set_rail_widths": return null;
+    case "background": return wallpaper();
+    case "pick_image": return pickImage();
+    case "set_background": try { localStorage.setItem(WALLPAPER_KEY, String(args.path)); } catch { /* Too large to keep. */ } return args.path;
+    case "clear_background": try { localStorage.setItem(WALLPAPER_KEY, "none"); } catch { /* Storage may be unavailable. */ } return null;
+    case "default_model": return settings.choice;
+    case "set_default_model": settings.choice = args.choice as typeof settings.choice; return null;
+    case "list_models": return models[args.harness as keyof typeof models];
+    case "favourite_models": case "toggle_favourite_model": return [];
+    case "pick_folder": {
+      const name = window.prompt("Preview: type a folder path to add as a project", "C:\\GitHub\\new-project");
+      return name || null;
+    }
+    case "open_project": {
+      const path = String(args.path);
+      const key = (root: unknown) => String(root).replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+      const existing = projects.find(project => key(project.root) === key(path));
+      if (existing) return { project: existing, created: false };
+      const project = { id: `p${Date.now()}`, name: path.split(/[\\/]/).filter(Boolean).pop() ?? path, root: path, createdAt: Date.now(), lastOpenedAt: Date.now(), sortOrder: Date.now() };
+      projects.push(project);
+      return { project, created: true };
+    }
+    case "open_stored_project": return projects.find(project => project.id === args.projectId);
+    case "list_projects": return sorted(projects);
+    case "list_project_summaries": return sorted(projects).map(summary);
+    case "rename_project": { const project = projects.find(row => row.id === args.projectId)!; project.name = named(args.name, "project"); return project; }
+    case "remove_project": {
+      projects.splice(projects.findIndex(row => row.id === args.projectId), 1);
+      for (let i = sessions.length - 1; i >= 0; i -= 1) if (sessions[i]!.projectId === args.projectId) sessions.splice(i, 1);
+      return null;
+    }
+    case "reorder_projects": (args.ids as string[]).forEach((id, index, all) => { const row = projects.find(p => p.id === id); if (row) row.sortOrder = all.length - index; }); return null;
+    case "reorder_sessions": return null;
+    case "new_chat": case "prune_chats": case "prune_sessions": return 0;
+    case "list_sessions": return sorted(sessions.filter(row => row.projectId === args.projectId));
+    case "create_session": {
+      const row: Row = { ...session(String(args.projectId), null, args.harness as "codex" | "claude", 0), sortOrder: Date.now() };
+      sessions.push(row);
+      blocks[row.id as string] = [];
+      return row;
+    }
+    case "rename_session": { const row = sessions.find(s => s.id === args.sessionId)!; row.title = named(args.title, "chat"); return { ...row }; }
+    case "archive_session": { const row = sessions.find(s => s.id === args.sessionId)!; row.archivedAt = args.archived ? Date.now() : null; return { ...row }; }
+    case "delete_session": sessions.splice(sessions.findIndex(row => row.id === args.sessionId), 1); return null;
+    case "session_blocks": return blocks[String(args.sessionId)] ?? [];
+    case "set_session_model": {
+      const row = sessions.find(s => s.id === args.sessionId);
+      if (row) { row.model = args.model; row.effort = args.effort; }
+      return null;
+    }
+    case "get_approval_mode": return settings.approval.get(String(args.sessionId)) ?? "auto";
+    case "set_approval_mode": settings.approval.set(String(args.sessionId), String(args.mode)); return null;
+    case "start_session": case "stop_session": case "cancel_turn": case "respond_approval": case "restart_session_thread": return null;
+    case "send_turn": {
+      const id = String(args.sessionId);
+      const row = sessions.find(s => s.id === id)!;
+      if (row.title == null) {
+        row.title = String(args.text).split("\n")[0]!.slice(0, 60);
+        // Stand-in for the agent-written title: the first few meaningful words.
+        const short = String(args.text).replace(/^(hey|hi|hello|please|can you|could you|we need to|i want to)[,\s]+/i, "").split(/\s+/).filter(word => !/^(the|a|an|to|we|need|entire|please)$/i.test(word)).slice(0, 3).join(" ");
+        setTimeout(() => {
+          row.title = short.charAt(0).toUpperCase() + short.slice(1);
+          for (const handler of listeners.get("kitty://session-title") ?? []) callbacks.get(handler)?.({ event: "kitty://session-title", id: handler, payload: { sessionId: id, projectId: row.projectId, title: row.title } });
+        }, 1500);
+      }
+      row.archivedAt = null;
+      const rows = blocks[id]!;
+      const seq = rows.length;
+      rows.push(block(seq, "user", String(args.text)));
+      void reply(id, String(args.text));
+      return seq;
+    }
+    case "search": {
+      const query = String(args.query).toLowerCase();
+      return Object.entries(blocks).flatMap(([sessionId, rows]) => rows
+        .filter(row => String(row.text).toLowerCase().includes(query))
+        .map(row => ({ sessionId, seq: row.seq, snippet: String(row.text).slice(0, 120) })));
+    }
+    default:
+      // Window and webview plumbing (dragging, zoom, minimise) has nothing to
+      // do in a browser tab.
+      return null;
+  }
+}
+
+/** Puts the pretend host where `@tauri-apps/api` looks for the real one. */
+export function install(): void {
+  const target = window as unknown as Record<string, unknown>;
+  target.__TAURI_INTERNALS__ = {
+    metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
+    transformCallback: (callback: Handler) => { const id = nextCallback++; callbacks.set(id, callback); return id; },
+    unregisterCallback: (id: number) => callbacks.delete(id),
+    convertFileSrc: (path: string) => path,
+    invoke: (cmd: string, args: Record<string, unknown> = {}) => command(cmd, args),
+  };
+  target.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined };
+  document.documentElement.dataset.preview = "true";
+}

@@ -9,24 +9,32 @@
 //! painted.
 
 mod sessions;
+mod titles;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use kitty_core::{HarnessId, InstallState, ModelCatalog, Scan};
-use kitty_engine::{Session, SessionSpec};
+use kitty_engine::{ApprovalMode, Session, SessionSpec};
 use kitty_probe::EnvSnapshot;
 use kitty_store::{Block, Hit, Project, SessionRow, Store};
 use tauri::{Manager, State};
 
 use sessions::{Live, Registry};
 
+type TitleSink = Arc<dyn Fn(&str, &str, &str) + Send + Sync>;
+
 struct AppState {
     /// Last completed harness scan, so a re-render costs nothing.
     scan: Mutex<Option<Scan>>,
     store: Arc<Store>,
     live: Registry,
+    /// Tells the window a chat was retitled. Set once the app is running;
+    /// absent in tests, which also keeps tests from asking a real CLI to name
+    /// their chats. A plain callback rather than the app handle, so code the
+    /// tests exercise never links Tauri's windowing.
+    retitled: std::sync::OnceLock<TitleSink>,
 }
 
 // -------------------------------------------------------------- pictures
@@ -192,19 +200,47 @@ async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
         .map(|p| p.to_string_lossy().into_owned()))
 }
 
+/// A folder added as a project, and whether it was already one.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenedProject {
+    project: Project,
+    /// False when the folder was already in the list and that project was
+    /// selected instead of a duplicate being made.
+    created: bool,
+}
+
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
-fn open_project(state: State<'_, AppState>, path: String) -> Result<Project, String> {
-    let root = PathBuf::from(&path);
+fn open_project(state: State<'_, AppState>, path: String) -> Result<OpenedProject, String> {
+    open_project_inner(&state, &path)
+}
+
+fn open_project_inner(state: &AppState, path: &str) -> Result<OpenedProject, String> {
+    let root = PathBuf::from(path);
     if !root.is_dir() {
         return Err(format!("{path} is not a folder"));
     }
-    let project = state
+    let (project, created) = state
         .store
-        .open_project(&root)
+        .add_project(&root)
         .map_err(|e| fail("could not open that project", e))?;
 
-    Ok(project)
+    Ok(OpenedProject { project, created })
+}
+
+/// Renames a project in Kitty. Never renames or moves its folder.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn rename_project(
+    state: State<'_, AppState>,
+    project_id: String,
+    name: String,
+) -> Result<Project, String> {
+    state
+        .store
+        .rename_project(&project_id, &name)
+        .map_err(|e| fail("could not rename that project", e))
 }
 
 /// Starts a conversation with no codebase behind it.
@@ -328,12 +364,19 @@ fn list_project_summaries(state: State<'_, AppState>) -> Result<Vec<ProjectSumma
         .collect())
 }
 
-/// Forgets a project and every conversation in it.
+/// Forgets a project and every conversation Kitty stored for it.
+///
+/// Only Kitty's records go. The folder, its files and the providers' own
+/// session records are never touched; nothing here deletes from disk.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 fn remove_project(state: State<'_, AppState>, project_id: String) -> Result<(), String> {
+    remove_project_inner(&state, &project_id)
+}
+
+fn remove_project_inner(state: &AppState, project_id: &str) -> Result<(), String> {
     // Stop anything running in it first, or its CLI would outlive the rows.
-    if let Ok(sessions) = state.store.list_sessions(&project_id) {
+    if let Ok(sessions) = state.store.list_sessions(project_id) {
         if let Ok(mut live) = state.live.lock() {
             for session in sessions {
                 live.remove(&session.id);
@@ -342,7 +385,7 @@ fn remove_project(state: State<'_, AppState>, project_id: String) -> Result<(), 
     }
     state
         .store
-        .delete_project(&project_id)
+        .delete_project(project_id)
         .map_err(|e| fail("could not remove that project", e))
 }
 
@@ -610,7 +653,14 @@ const IMAGE_TYPES: [(&str, &str); 6] = [
 
 /// How the window is painted. Anything else is refused rather than stored and
 /// silently ignored by the frontend.
-const THEMES: [&str; 3] = ["system", "light", "dark"];
+const THEMES: [&str; 6] = [
+    "system",
+    "light",
+    "dark",
+    "nord",
+    "catppuccin-mocha",
+    "solarized-light",
+];
 
 /// The chosen theme, defaulting to following the OS.
 #[allow(clippy::needless_pass_by_value)]
@@ -831,6 +881,7 @@ fn create_session(
     project_id: String,
     harness: String,
 ) -> Result<SessionRow, String> {
+    parse_harness(&harness)?;
     state
         .store
         .create_session(&project_id, &harness, None)
@@ -838,6 +889,9 @@ fn create_session(
 }
 
 /// Forgets one conversation and its transcript.
+///
+/// Kitty's copy only: project files are never touched, and the provider's own
+/// session record stays with the provider.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 fn delete_session(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
@@ -848,7 +902,50 @@ fn delete_session(state: State<'_, AppState>, session_id: String) -> Result<(), 
     state
         .store
         .delete_session(&session_id)
-        .map_err(|e| fail("could not delete that conversation", e))
+        .map_err(|e| fail("could not delete that chat", e))
+}
+
+/// Renames a chat. Kitty's title only; neither CLI is asked to rename.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn rename_session(
+    state: State<'_, AppState>,
+    session_id: String,
+    title: String,
+) -> Result<SessionRow, String> {
+    state
+        .store
+        .rename_session(&session_id, &title)
+        .map_err(|e| fail("could not rename that chat", e))
+}
+
+/// Archives a chat, or restores it.
+#[allow(clippy::needless_pass_by_value)]
+#[tauri::command]
+fn archive_session(
+    state: State<'_, AppState>,
+    session_id: String,
+    archived: bool,
+) -> Result<SessionRow, String> {
+    archive_session_inner(&state, &session_id, archived)
+}
+
+fn archive_session_inner(
+    state: &AppState,
+    session_id: &str,
+    archived: bool,
+) -> Result<SessionRow, String> {
+    // An archived chat is put away, so its CLI is stopped like a closed one.
+    // Its provider session id is kept; restoring and sending resumes it.
+    if archived {
+        if let Ok(mut live) = state.live.lock() {
+            live.remove(session_id);
+        }
+    }
+    state
+        .store
+        .set_session_archived(session_id, archived)
+        .map_err(|e| fail("could not archive that chat", e))
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -860,30 +957,145 @@ fn session_blocks(state: State<'_, AppState>, session_id: String) -> Result<Vec<
         .map_err(|e| fail("could not load the transcript", e))
 }
 
+fn parse_approval_mode(mode: &str) -> Result<ApprovalMode, String> {
+    match mode {
+        "ask" => Ok(ApprovalMode::Ask),
+        "edits" => Ok(ApprovalMode::Edits),
+        "auto" => Ok(ApprovalMode::Auto),
+        _ => Err("Unknown approval mode".to_owned()),
+    }
+}
+
+/// A conversation's permission choice. Automatic approval unless changed.
+fn read_approval_mode(store: &Store, session_id: &str) -> Result<String, String> {
+    store
+        .setting("session", session_id, "approval_mode")
+        .map(|value| value.unwrap_or_else(|| "auto".to_owned()))
+        .map_err(|e| fail("could not read permissions", e))
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn get_approval_mode(state: State<'_, AppState>, session_id: String) -> Result<String, String> {
+    read_approval_mode(&state.store, &session_id)
+}
+
+#[tauri::command]
+#[allow(clippy::needless_pass_by_value)]
+fn set_approval_mode(
+    state: State<'_, AppState>,
+    session_id: String,
+    mode: String,
+) -> Result<(), String> {
+    set_approval_mode_inner(&state, &session_id, &mode)
+}
+
+/// Saves the choice and applies it to the running CLI, including any request
+/// already waiting that the new mode covers.
+fn set_approval_mode_inner(state: &AppState, session_id: &str, mode: &str) -> Result<(), String> {
+    let parsed = parse_approval_mode(mode)?;
+    state
+        .store
+        .session(session_id)
+        .map_err(|e| fail("no such session", e))?;
+    state
+        .store
+        .set_setting("session", session_id, "approval_mode", mode)
+        .map_err(|e| fail("could not save permissions", e))?;
+    let live = state
+        .live
+        .lock()
+        .map_err(|_| "the session registry was poisoned".to_owned())?;
+    if let Some(entry) = live.get(session_id) {
+        if entry.session.is_alive() && !entry.session.set_approval_mode(parsed) {
+            return Err("the agent stopped".to_owned());
+        }
+    }
+    Ok(())
+}
+
 /// Starts the CLI for a session, if it is not already running.
 ///
 /// Idempotent: the frontend calls this whenever it opens a session, and a
 /// session that is already live just stays live.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
-fn start_session(
+async fn start_session(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        start_session_inner(app.clone(), &state, &session_id)
+    })
+    .await
+    .map_err(|error| fail("could not start the agent", error))?
+}
+
+/// One gate per session, so concurrent opens cannot launch two engines while
+/// the shared registry stays free during slow probing and spawning.
+fn start_gate(session_id: &str) -> Arc<Mutex<()>> {
+    static GATES: std::sync::OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
+        std::sync::OnceLock::new();
+    GATES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_or_else(
+            |_| Arc::new(Mutex::new(())),
+            |mut gates| Arc::clone(gates.entry(session_id.to_owned()).or_default()),
+        )
+}
+
+/// How long a successful CLI probe is reused when starting sessions. Every
+/// probe launches the CLI, and an npm shim boots Node before it answers.
+const PROBE_REUSE: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn session_probe(harness: HarnessId) -> kitty_core::HarnessStatus {
+    static PROBES: Mutex<Vec<(HarnessId, std::time::Instant, kitty_core::HarnessStatus)>> =
+        Mutex::new(Vec::new());
+    if let Ok(probes) = PROBES.lock() {
+        if let Some((_, _, status)) = probes
+            .iter()
+            .find(|(id, at, _)| *id == harness && at.elapsed() < PROBE_REUSE)
+        {
+            return status.clone();
+        }
+    }
+    let status = kitty_probe::probe_one(harness, &EnvSnapshot::capture());
+    // Only a found CLI is reused; a missing one is looked for again next time.
+    if matches!(status.install, InstallState::Found { .. }) {
+        if let Ok(mut probes) = PROBES.lock() {
+            probes.retain(|(id, _, _)| *id != harness);
+            probes.push((harness, std::time::Instant::now(), status.clone()));
+        }
+    }
+    status
+}
+
+fn start_session_inner(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
-    session_id: String,
+    state: &AppState,
+    session_id: &str,
 ) -> Result<(), String> {
+    // Replace exited engines without replaying user work.
+    let gate = start_gate(session_id);
+    let _starting = gate
+        .lock()
+        .map_err(|_| "a session start was poisoned".to_owned())?;
     {
-        let live = state
+        let mut live = state
             .live
             .lock()
             .map_err(|_| "the session registry was poisoned".to_owned())?;
-        if live.contains_key(&session_id) {
+        if live
+            .get(session_id)
+            .is_some_and(|entry| entry.session.is_alive())
+        {
             return Ok(());
         }
+        live.remove(session_id);
     }
 
     let row = state
         .store
-        .session(&session_id)
+        .session(session_id)
         .map_err(|e| fail("no such session", e))?;
     let project = state
         .store
@@ -893,16 +1105,11 @@ fn start_session(
         .find(|p| p.id == row.project_id)
         .ok_or_else(|| "the session's project is missing".to_owned())?;
 
-    let harness = match row.harness.as_str() {
-        "claude" => HarnessId::Claude,
-        "codex" => HarnessId::Codex,
-        other => return Err(format!("unknown harness {other}")),
-    };
+    let harness = parse_harness(&row.harness)?;
 
     // Resolve the binary the same way the Agents screen does, so a session
     // cannot start against something the user was told is unavailable.
-    let env = EnvSnapshot::capture();
-    let status = kitty_probe::probe_one(harness, &env);
+    let status = session_probe(harness);
     let InstallState::Found { path, .. } = &status.install else {
         let hint = status
             .hint
@@ -921,27 +1128,80 @@ fn start_session(
         None => scratch_dir(&app, &project.id)?,
     };
     let mut spec = SessionSpec::new(harness, path, &cwd);
-    spec.resume.clone_from(&row.provider_session);
+    spec.approval_mode = parse_approval_mode(&read_approval_mode(&state.store, session_id)?)?;
+    // Explicit recovery asked for fresh provider context; the saved Kitty
+    // transcript is untouched and nothing is replayed.
+    if state
+        .store
+        .setting("session", session_id, "fresh_context")
+        .map_err(|e| fail("could not read recovery state", e))?
+        .as_deref()
+        != Some("true")
+    {
+        spec.resume.clone_from(&row.provider_session);
+    }
     spec.model.clone_from(&row.model);
     spec.effort.clone_from(&row.effort);
 
     let (session, events) =
         Session::start(&spec).map_err(|e| fail("could not start the agent", e))?;
 
-    sessions::pump(app, Arc::clone(&state.store), session_id.clone(), events);
-
     state
         .live
         .lock()
         .map_err(|_| "the session registry was poisoned".to_owned())?
-        .insert(session_id, Live { session });
+        .insert(session_id.to_owned(), Live { session });
+    sessions::pump(app, Arc::clone(&state.store), session_id.to_owned(), events);
 
     Ok(())
 }
 
+/// Sends the user's message straight to the conversation's CLI.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 fn send_turn(state: State<'_, AppState>, session_id: String, text: String) -> Result<i64, String> {
+    send_turn_inner(&state, &session_id, &text)
+}
+
+/// Asks the chat's own agent for a short title, in the background.
+///
+/// The first-line title is already showing; this only improves it, and only
+/// if nobody renamed the chat meanwhile. The window is told so the sidebar and
+/// tab update without waiting for the reply to finish.
+fn name_chat(state: &AppState, session_id: &str, message: &str) {
+    let Some(retitled) = state.retitled.get().cloned() else {
+        return;
+    };
+    let Ok(row) = state.store.session(session_id) else {
+        return;
+    };
+    let Some(first_line) = row.title.clone() else {
+        return;
+    };
+    let Ok(harness) = parse_harness(&row.harness) else {
+        return;
+    };
+    let store = Arc::clone(&state.store);
+    let session_id = session_id.to_owned();
+    let message = message.to_owned();
+    std::thread::spawn(move || {
+        let status = session_probe(harness);
+        let InstallState::Found { path, .. } = &status.install else {
+            return;
+        };
+        let Some(title) = titles::generate(harness, Path::new(path), &message) else {
+            return;
+        };
+        if store
+            .replace_title_if(&session_id, &first_line, &title)
+            .unwrap_or(false)
+        {
+            retitled(&session_id, &row.project_id, &title);
+        }
+    });
+}
+
+fn send_turn_inner(state: &AppState, session_id: &str, text: &str) -> Result<i64, String> {
     let trimmed = text.trim_end();
     if trimmed.is_empty() {
         return Err("nothing to send".to_owned());
@@ -951,16 +1211,31 @@ fn send_turn(state: State<'_, AppState>, session_id: String, text: String) -> Re
     // the two does not lose what they typed.
     let seq = state
         .store
-        .append_block(&session_id, kitty_core::BlockKind::User, trimmed)
+        .append_block(session_id, kitty_core::BlockKind::User, trimmed)
         .map_err(|e| fail("could not save your message", e))?;
-    let _ = state.store.set_title_if_unset(&session_id, trimmed);
+    let first = state
+        .store
+        .session(session_id)
+        .is_ok_and(|row| row.title.as_deref().is_none_or(str::is_empty));
+    let _ = state.store.set_title_if_unset(session_id, trimmed);
+    if first {
+        name_chat(state, session_id, trimmed);
+    }
+    // Writing in an archived chat is a decision to carry on with it.
+    if state
+        .store
+        .session(session_id)
+        .is_ok_and(|row| row.archived_at.is_some())
+    {
+        let _ = state.store.set_session_archived(session_id, false);
+    }
 
     let live = state
         .live
         .lock()
         .map_err(|_| "the session registry was poisoned".to_owned())?;
     let session = live
-        .get(&session_id)
+        .get(session_id)
         .ok_or_else(|| "that session is not running".to_owned())?;
 
     if session.session.send(trimmed) {
@@ -977,7 +1252,7 @@ fn send_turn(state: State<'_, AppState>, session_id: String, text: String) -> Re
 /// first time it started.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
-fn set_session_model(
+async fn set_session_model(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     session_id: String,
@@ -998,7 +1273,7 @@ fn set_session_model(
         live.remove(&session_id);
     }
 
-    start_session(app, state, session_id)
+    start_session(app, session_id).await
 }
 
 /// Answers a permission request the agent raised.
@@ -1043,6 +1318,31 @@ fn stop_session(state: State<'_, AppState>, session_id: String) -> Result<(), St
         .map_err(|_| "the session registry was poisoned".to_owned())?;
     live.remove(&session_id);
     Ok(())
+}
+
+/// Explicitly replace provider context, retaining the saved Kitty transcript.
+/// No user request is replayed and the harness/model choices stay unchanged.
+#[tauri::command]
+async fn restart_session_thread(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state
+            .store
+            .session(&session_id)
+            .map_err(|e| fail("no such session", e))?;
+        state
+            .live
+            .lock()
+            .map_err(|_| "Session registry poisoned")?
+            .remove(&session_id);
+        state
+            .store
+            .set_setting("session", &session_id, "fresh_context", "true")
+            .map_err(|e| fail("could not save recovery state", e))?;
+        start_session_inner(app.clone(), &state, &session_id)
+    })
+    .await
+    .map_err(|error| fail("could not restart agent context", error))?
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -1127,6 +1427,7 @@ pub fn run() {
             prune_sessions,
             list_project_summaries,
             remove_project,
+            rename_project,
             list_models,
             favourite_models,
             toggle_favourite_model,
@@ -1135,11 +1436,16 @@ pub fn run() {
             create_session,
             session_blocks,
             delete_session,
+            rename_session,
+            archive_session,
             start_session,
+            get_approval_mode,
+            set_approval_mode,
             send_turn,
             respond_approval,
             cancel_turn,
             stop_session,
+            restart_session_thread,
             search,
         ])
         .setup(|app| {
@@ -1155,7 +1461,17 @@ pub fn run() {
                 scan: Mutex::new(None),
                 store,
                 live: Arc::new(Mutex::new(HashMap::new())),
+                retitled: std::sync::OnceLock::new(),
             });
+            let handle = app.handle().clone();
+            let sink: TitleSink = Arc::new(move |session_id, project_id, title| {
+                use tauri::Emitter;
+                let _ = handle.emit(
+                    "kitty://session-title",
+                    serde_json::json!({ "sessionId": session_id, "projectId": project_id, "title": title }),
+                );
+            });
+            let _ = app.state::<AppState>().retitled.set(sink);
             Ok(())
         })
         .run(tauri::generate_context!());
@@ -1172,7 +1488,259 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{picture_mime, servable_picture};
+    use std::collections::HashMap;
     use std::path::{Path, PathBuf};
+
+    fn state(store: kitty_store::Store, live: HashMap<String, super::Live>) -> super::AppState {
+        super::AppState {
+            scan: std::sync::Mutex::new(None),
+            store: std::sync::Arc::new(store),
+            live: std::sync::Mutex::new(live).into(),
+            retitled: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// A fake Claude CLI that records the frame it is sent, then replies.
+    #[cfg(windows)]
+    fn recording_claude(folder: &Path, frames: &str) -> PathBuf {
+        std::fs::create_dir_all(folder).unwrap();
+        std::fs::write(folder.join("frames.jsonl"), frames).unwrap();
+        let binary = folder.join("claude.cmd");
+        std::fs::write(
+            &binary,
+            "@echo off\r\nset /p turn=\r\n>\"%~dp0turn.txt\" echo(%turn%\r\ntype \"%~dp0frames.jsonl\"\r\nset /p answer=\r\n",
+        )
+        .unwrap();
+        binary
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let folder = std::env::temp_dir().join(format!("kitty-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        folder
+    }
+
+    #[test]
+    fn adding_a_folder_twice_selects_the_existing_project() {
+        let folder = scratch("add-twice");
+        let state = state(kitty_store::Store::in_memory().unwrap(), HashMap::new());
+
+        let first = super::open_project_inner(&state, folder.to_str().unwrap()).unwrap();
+        assert!(first.created);
+        let again = super::open_project_inner(&state, &format!("{}\\", folder.display())).unwrap();
+        assert!(!again.created, "the same folder is not added twice");
+        assert_eq!(again.project.id, first.project.id);
+        assert_eq!(state.store.list_projects().unwrap().len(), 1);
+
+        assert!(
+            super::open_project_inner(&state, &folder.join("missing").display().to_string())
+                .is_err(),
+            "a path that is not a folder is refused"
+        );
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn removing_a_project_keeps_its_folder_and_files() {
+        let folder = scratch("remove-project");
+        std::fs::write(folder.join("notes.md"), "mine").unwrap();
+        let state = state(kitty_store::Store::in_memory().unwrap(), HashMap::new());
+        let opened = super::open_project_inner(&state, folder.to_str().unwrap()).unwrap();
+        let chat = state
+            .store
+            .create_session(&opened.project.id, "codex", None)
+            .unwrap();
+        state
+            .store
+            .append_block(&chat.id, kitty_core::BlockKind::User, "hello")
+            .unwrap();
+
+        super::remove_project_inner(&state, &opened.project.id).unwrap();
+
+        assert_eq!(state.store.list_projects().unwrap().len(), 0);
+        assert!(state.store.session(&chat.id).is_err());
+        assert!(folder.is_dir(), "the folder stays on disk");
+        assert_eq!(
+            std::fs::read_to_string(folder.join("notes.md")).unwrap(),
+            "mine"
+        );
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn archiving_stops_a_chat_and_writing_in_it_restores_it() {
+        use kitty_core::{HarnessId, SessionEvent};
+        use kitty_engine::{Session, SessionSpec};
+        use std::time::Duration;
+        let folder = scratch("archive");
+        let frames = "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"fake\"}\n{\"type\":\"result\",\"stop_reason\":\"end_turn\",\"is_error\":false}\n";
+        let binary = recording_claude(&folder, frames);
+        let store = kitty_store::Store::in_memory().unwrap();
+        let project = store.open_project(&folder).unwrap();
+        let row = store.create_session(&project.id, "claude", None).unwrap();
+        let spec = SessionSpec::new(HarnessId::Claude, &binary, &folder);
+        let (session, _events) = Session::start(&spec).unwrap();
+        let state = state(
+            store,
+            HashMap::from([(row.id.clone(), super::Live { session })]),
+        );
+
+        let archived = super::archive_session_inner(&state, &row.id, true).unwrap();
+        assert!(archived.archived_at.is_some());
+        assert!(
+            !state.live.lock().unwrap().contains_key(&row.id),
+            "an archived chat's CLI is stopped"
+        );
+
+        let (session, events) = Session::start(&spec).unwrap();
+        state
+            .live
+            .lock()
+            .unwrap()
+            .insert(row.id.clone(), super::Live { session });
+        super::send_turn_inner(&state, &row.id, "Carry on").unwrap();
+        loop {
+            if matches!(
+                events.recv_timeout(Duration::from_secs(5)).unwrap(),
+                SessionEvent::TurnEnded { .. }
+            ) {
+                break;
+            }
+        }
+        assert_eq!(
+            state.store.session(&row.id).unwrap().archived_at,
+            None,
+            "sending a message brings the chat back to the list"
+        );
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_message_goes_straight_to_the_conversations_cli() {
+        use kitty_core::{HarnessId, SessionEvent};
+        use kitty_engine::{Session, SessionSpec};
+        use std::time::Duration;
+        let folder = std::env::temp_dir().join(format!("kitty-direct-send-{}", std::process::id()));
+        let binary = recording_claude(
+            &folder,
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"fake\"}\n{\"type\":\"result\",\"stop_reason\":\"end_turn\",\"is_error\":false}\n",
+        );
+        let store = kitty_store::Store::in_memory().unwrap();
+        let project = store.create_rootless_project("Direct").unwrap();
+        let row = store.create_session(&project.id, "claude", None).unwrap();
+        let (session, events) =
+            Session::start(&SessionSpec::new(HarnessId::Claude, &binary, &folder)).unwrap();
+        let state = state(
+            store,
+            HashMap::from([(row.id.clone(), super::Live { session })]),
+        );
+
+        let seq = super::send_turn_inner(&state, &row.id, "Fix the heading\n").unwrap();
+        loop {
+            if matches!(
+                events.recv_timeout(Duration::from_secs(5)).unwrap(),
+                SessionEvent::TurnEnded { .. }
+            ) {
+                break;
+            }
+        }
+
+        // Exactly what was typed, as the only content of one user frame.
+        let frame: serde_json::Value = serde_json::from_str(
+            std::fs::read_to_string(folder.join("turn.txt"))
+                .unwrap()
+                .trim(),
+        )
+        .unwrap();
+        assert_eq!(frame["type"], "user");
+        assert_eq!(
+            frame["message"]["content"],
+            serde_json::json!([{ "type": "text", "text": "Fix the heading" }])
+        );
+        let blocks = state.store.blocks(&row.id).unwrap();
+        assert_eq!(blocks[0].seq, seq);
+        assert_eq!(blocks[0].text, "Fix the heading");
+        assert_eq!(
+            state.store.session(&row.id).unwrap().title.as_deref(),
+            Some("Fix the heading")
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_permission_change_applies_to_that_conversations_waiting_request() {
+        use kitty_core::{ApprovalOutcome, HarnessId, SessionEvent};
+        use kitty_engine::{Session, SessionSpec};
+        use std::time::Duration;
+        let folder =
+            std::env::temp_dir().join(format!("kitty-permission-test-{}", std::process::id()));
+        let binary = recording_claude(&folder, concat!(
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"fake\"}\n",
+            "{\"type\":\"control_request\",\"request_id\":\"edit\",\"request\":{\"subtype\":\"can_use_tool\",\"tool_name\":\"Write\",\"input\":{}}}\n"
+        ));
+        let store = kitty_store::Store::in_memory().unwrap();
+        let project = store.create_rootless_project("Permissions").unwrap();
+        let chosen = store.create_session(&project.id, "claude", None).unwrap();
+        let other = store.create_session(&project.id, "claude", None).unwrap();
+        let mut live = HashMap::new();
+        let mut receivers = Vec::new();
+        for row in [&chosen, &other] {
+            let (session, events) =
+                Session::start(&SessionSpec::new(HarnessId::Claude, &binary, &folder)).unwrap();
+            assert!(session.send("test"));
+            loop {
+                if matches!(
+                    events.recv_timeout(Duration::from_secs(5)).unwrap(),
+                    SessionEvent::ApprovalRequested { .. }
+                ) {
+                    break;
+                }
+            }
+            live.insert(row.id.clone(), super::Live { session });
+            receivers.push(events);
+        }
+        let state = state(store, live);
+        super::set_approval_mode_inner(&state, &chosen.id, "edits").unwrap();
+        loop {
+            if let SessionEvent::ApprovalResolved { id, outcome } =
+                receivers[0].recv_timeout(Duration::from_secs(5)).unwrap()
+            {
+                assert_eq!(id, "edit");
+                assert_eq!(outcome, ApprovalOutcome::Allowed);
+                break;
+            }
+        }
+        // Another conversation's choice is its own.
+        assert!(receivers[1]
+            .recv_timeout(Duration::from_millis(100))
+            .is_err());
+    }
+
+    #[test]
+    fn permissions_default_to_automatic_and_belong_to_each_conversation() {
+        let store = kitty_store::Store::in_memory().unwrap();
+        let project = store.create_rootless_project("Permissions").unwrap();
+        let first = store.create_session(&project.id, "codex", None).unwrap();
+        let second = store.create_session(&project.id, "claude", None).unwrap();
+        let state = state(store, HashMap::new());
+        for mode in ["edits", "ask", "auto"] {
+            super::set_approval_mode_inner(&state, &first.id, mode).unwrap();
+            assert_eq!(
+                super::read_approval_mode(&state.store, &first.id).unwrap(),
+                mode
+            );
+        }
+        super::set_approval_mode_inner(&state, &first.id, "ask").unwrap();
+        assert_eq!(
+            super::read_approval_mode(&state.store, &second.id).unwrap(),
+            "auto"
+        );
+        assert!(super::set_approval_mode_inner(&state, &first.id, "invalid").is_err());
+        assert!(super::set_approval_mode_inner(&state, "missing", "auto").is_err());
+    }
 
     /// A folder standing in for `~/.codex`, with a picture and a secret in it.
     fn sandbox() -> (PathBuf, PathBuf) {

@@ -22,15 +22,32 @@ export interface SearchResult extends Hit {
 export interface ProjectState {
   projects: ProjectSummary[];
   loading: boolean;
+  /**
+   * Each project's chats, archived ones included, once its section has been
+   * opened in the sidebar. The open project's list is the chat store's,
+   * mirrored here so the sidebar reads one place.
+   */
+  chats: Record<string, SessionRow[]>;
+  /** Projects whose chats are shown in the sidebar. A per-viewer preference. */
+  expanded: Record<string, boolean>;
   query: string;
   results: SearchResult[];
   searching: boolean;
   error: string | null;
 }
 
+function readExpanded(): Record<string, boolean> {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem("kitty.expandedProjects") ?? "{}");
+    return saved && typeof saved === "object" ? saved as Record<string, boolean> : {};
+  } catch { return {}; }
+}
+
 const EMPTY: ProjectState = {
   projects: [],
   loading: false,
+  chats: {},
+  expanded: readExpanded(),
   query: "",
   results: [],
   searching: false,
@@ -63,13 +80,69 @@ function message(error: unknown): string {
   return "something went wrong";
 }
 
+export function snapshot(): ProjectState {
+  return state;
+}
+
 export async function refresh(): Promise<void> {
   set({ loading: true, error: null });
   try {
-    set({ projects: await ipc.listProjectSummaries(), loading: false });
+    const projects = await ipc.listProjectSummaries();
+    set({ projects, loading: false });
+    // Sections left open last time show their chats straight away.
+    for (const project of projects) {
+      if (state.expanded[project.id] && !state.chats[project.id]) void loadChats(project.id);
+    }
   } catch (error) {
     set({ error: message(error), loading: false });
   }
+}
+
+/** Reads one project's chats into the sidebar. */
+export async function loadChats(projectId: string): Promise<void> {
+  try {
+    setChats(projectId, await ipc.listSessions(projectId));
+  } catch {
+    // The section shows what it had; opening the project retries.
+  }
+}
+
+/** Replaces one project's chats, as the sidebar should show them. */
+export function setChats(projectId: string, rows: SessionRow[]): void {
+  if (state.chats[projectId] === rows) return;
+  set({ chats: { ...state.chats, [projectId]: rows } });
+}
+
+/** Changes one chat in place, wherever it is listed. */
+export function patchChat(projectId: string, id: string, update: (row: SessionRow) => SessionRow | null): void {
+  const rows = state.chats[projectId];
+  if (!rows) return;
+  setChats(projectId, rows.flatMap(row => {
+    if (row.id !== id) return [row];
+    const next = update(row);
+    return next ? [next] : [];
+  }));
+}
+
+/** Changes one project in place, e.g. an optimistic rename. */
+export function patchProject(id: string, update: (project: ProjectSummary) => ProjectSummary): void {
+  set({ projects: state.projects.map(project => project.id === id ? update(project) : project) });
+}
+
+/** Drops a removed project from the list immediately. */
+export function forgetProjectRow(id: string): void {
+  const { [id]: _chats, ...chats } = state.chats;
+  set({ projects: state.projects.filter(project => project.id !== id), chats });
+}
+
+/** Shows or hides a project's chats. */
+export function setExpanded(projectId: string, open: boolean): void {
+  if (Boolean(state.expanded[projectId]) === open) return;
+  const expanded = { ...state.expanded, [projectId]: open };
+  if (!open) delete expanded[projectId];
+  set({ expanded });
+  try { localStorage.setItem("kitty.expandedProjects", JSON.stringify(expanded)); } catch { /* Storage may be unavailable. */ }
+  if (open && !state.chats[projectId]) void loadChats(projectId);
 }
 
 

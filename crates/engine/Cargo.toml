@@ -16,4 +16,5 @@ kitty-supervisor = { workspace = true }
 
 [dev-dependencies]
 kitty-probe = { workspace = true }
+serde_json = { workspace = true }
 tempfile = "3"

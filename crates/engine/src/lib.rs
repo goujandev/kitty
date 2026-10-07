@@ -15,8 +15,11 @@
 //! in slice 3 and belong in this file, not in a codec.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use kitty_core::{ApprovalOutcome, ErrorKind, HarnessId, SessionEvent, StopReason};
 use kitty_harness::{codec_for, launch_args, Codec, StartContext};
@@ -25,6 +28,9 @@ use kitty_supervisor::{spawn, Child, ChildEvent, Frame, SpawnSpec};
 /// How a session is started.
 #[derive(Debug, Clone)]
 pub struct SessionSpec {
+    /// Bound the wait for the CLI to acknowledge a requested turn.
+    pub turn_start_timeout: Duration,
+    pub approval_mode: ApprovalMode,
     pub harness: HarnessId,
     /// Resolved executable, from `kitty_probe`.
     pub binary: PathBuf,
@@ -39,6 +45,8 @@ pub struct SessionSpec {
 impl SessionSpec {
     pub fn new(harness: HarnessId, binary: impl Into<PathBuf>, cwd: impl Into<PathBuf>) -> Self {
         Self {
+            turn_start_timeout: Duration::from_secs(60),
+            approval_mode: ApprovalMode::Ask,
             harness,
             binary: binary.into(),
             cwd: cwd.into(),
@@ -53,13 +61,54 @@ impl SessionSpec {
 pub struct Session {
     commands: Sender<Command>,
     harness: HarnessId,
+    alive: Arc<AtomicBool>,
 }
 
 enum Command {
+    ApprovalMode(ApprovalMode),
     Turn(String),
     Approve { id: String, allow: bool },
     Cancel,
     Shutdown,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub enum ApprovalMode {
+    #[default]
+    Ask,
+    Edits,
+    Auto,
+}
+
+impl ApprovalMode {
+    #[must_use]
+    pub fn approves(self, kind: kitty_core::ApprovalKind) -> bool {
+        matches!(self, Self::Auto)
+            || matches!((self, kind), (Self::Edits, kitty_core::ApprovalKind::Edit))
+    }
+}
+
+#[cfg(test)]
+mod approval_mode_tests {
+    use super::ApprovalMode;
+    use kitty_core::ApprovalKind;
+
+    #[test]
+    fn modes_only_approve_the_requested_categories() {
+        for kind in [
+            ApprovalKind::Edit,
+            ApprovalKind::Command,
+            ApprovalKind::Network,
+            ApprovalKind::Other,
+        ] {
+            assert!(!ApprovalMode::Ask.approves(kind));
+            assert!(ApprovalMode::Auto.approves(kind));
+            assert_eq!(
+                ApprovalMode::Edits.approves(kind),
+                kind == ApprovalKind::Edit
+            );
+        }
+    }
 }
 
 /// Merged input to the pump, so it has one thing to wait on.
@@ -135,8 +184,13 @@ impl Session {
             effort: spec.effort.clone(),
         };
 
+        let approval_mode = spec.approval_mode;
+        let turn_start_timeout = spec.turn_start_timeout;
+        let alive = Arc::new(AtomicBool::new(true));
+        let pump_alive = Arc::clone(&alive);
         thread::spawn(move || {
             Pump {
+                approval_mode,
                 child,
                 codec,
                 out: events_tx,
@@ -144,17 +198,27 @@ impl Session {
                 queued: Vec::new(),
                 cancelling: false,
                 pending: Vec::new(),
+                awaiting_start: None,
+                turn_start_timeout,
             }
             .run(&ctx, &incoming_rx);
+            pump_alive.store(false, Ordering::Release);
         });
 
         Ok((
             Self {
                 commands: commands_tx,
                 harness: spec.harness,
+                alive,
             },
             events_rx,
         ))
+    }
+
+    /// Whether the engine pump still owns a running process.
+    #[must_use]
+    pub fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Acquire)
     }
 
     #[must_use]
@@ -162,12 +226,17 @@ impl Session {
         self.harness
     }
 
+    #[must_use]
+    pub fn set_approval_mode(&self, mode: ApprovalMode) -> bool {
+        self.commands.send(Command::ApprovalMode(mode)).is_ok()
+    }
+
     /// Asks the model something. Queued if a turn is already running.
     ///
     /// Returns false once the session has shut down.
     #[must_use]
     pub fn send(&self, text: impl Into<String>) -> bool {
-        self.commands.send(Command::Turn(text.into())).is_ok()
+        self.is_alive() && self.commands.send(Command::Turn(text.into())).is_ok()
     }
 
     /// Answers a permission request.
@@ -213,6 +282,9 @@ impl std::fmt::Display for StartError {
 impl std::error::Error for StartError {}
 
 struct Pump {
+    awaiting_start: Option<Instant>,
+    turn_start_timeout: Duration,
+    approval_mode: ApprovalMode,
     child: Child,
     codec: Box<dyn Codec>,
     out: Sender<SessionEvent>,
@@ -227,7 +299,7 @@ struct Pump {
     /// Tracked here rather than in a codec because every harness has them and
     /// the rules are the same: a cancel denies them, and a turn ending
     /// abandons them (ADR-0002).
-    pending: Vec<String>,
+    pending: Vec<(String, kitty_core::ApprovalKind)>,
 }
 
 impl Pump {
@@ -235,8 +307,22 @@ impl Pump {
         let step = self.codec.start(ctx);
         self.dispatch(step);
 
-        while let Ok(message) = incoming.recv() {
+        loop {
+            // Diagnostics or status traffic must not postpone the deadline.
+            if self.fail_unstarted_turn() {
+                return;
+            }
+            let message = match incoming.recv_timeout(Duration::from_millis(100)) {
+                Ok(message) => message,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    continue;
+                }
+            };
             match message {
+                Incoming::Command(Command::ApprovalMode(mode)) => {
+                    self.change_approval_mode(mode);
+                }
                 Incoming::Child(ChildEvent::Frames(frames)) => {
                     for frame in frames {
                         match frame {
@@ -304,7 +390,7 @@ impl Pump {
                     self.queued.clear();
                     // Anything waiting on the user is denied, because leaving
                     // a request unanswered would hold the CLI open forever.
-                    for id in std::mem::take(&mut self.pending) {
+                    for (id, _) in std::mem::take(&mut self.pending) {
                         let step = self.codec.respond_approval(&id, false);
                         self.dispatch(step);
                         self.emit(SessionEvent::ApprovalResolved {
@@ -320,6 +406,14 @@ impl Pump {
                 }
 
                 Incoming::Command(Command::Shutdown) => {
+                    // Every begun turn ends exactly once, so the window never keeps a
+                    // spinner for a turn whose process is gone.
+                    if self.busy {
+                        self.emit(SessionEvent::TurnEnded {
+                            stop: StopReason::Interrupted,
+                        });
+                        self.busy = false;
+                    }
                     self.child.kill();
                     return;
                 }
@@ -327,8 +421,44 @@ impl Pump {
         }
     }
 
+    fn change_approval_mode(&mut self, mode: ApprovalMode) {
+        self.approval_mode = mode;
+        let approved: Vec<String> = self
+            .pending
+            .iter()
+            .filter(|(_, kind)| mode.approves(*kind))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in approved {
+            let reply = self.codec.respond_approval(&id, true);
+            self.dispatch(reply);
+            self.settle(&id, ApprovalOutcome::Allowed);
+        }
+    }
+
+    fn fail_unstarted_turn(&mut self) -> bool {
+        if self
+            .awaiting_start
+            .is_none_or(|start| start.elapsed() < self.turn_start_timeout)
+        {
+            return false;
+        }
+        let message = "The agent did not start the requested turn within the startup limit. Its process was stopped; retry explicitly to continue.".to_owned();
+        self.emit(SessionEvent::Error {
+            error_kind: ErrorKind::Process,
+            message: message.clone(),
+            retryable: true,
+        });
+        self.emit(SessionEvent::TurnEnded {
+            stop: StopReason::Failed { message },
+        });
+        self.child.kill();
+        true
+    }
+
     fn begin(&mut self, text: &str) {
         self.busy = true;
+        self.awaiting_start = Some(Instant::now());
         self.cancelling = false;
         let step = self.codec.send_turn(text);
         self.dispatch(step);
@@ -351,16 +481,42 @@ impl Pump {
         }
 
         for event in step.events {
+            if matches!(
+                &event,
+                SessionEvent::TurnStarted
+                    | SessionEvent::MessageDelta { .. }
+                    | SessionEvent::ReasoningDelta { .. }
+                    | SessionEvent::ToolStarted { .. }
+                    | SessionEvent::ApprovalRequested { .. }
+            ) {
+                self.awaiting_start = None;
+            }
+            if let SessionEvent::ApprovalRequested {
+                id, approval_kind, ..
+            } = &event
+            {
+                if self.approval_mode.approves(*approval_kind) {
+                    let reply = self.codec.respond_approval(id, true);
+                    self.dispatch(reply);
+                    self.emit(SessionEvent::ApprovalResolved {
+                        id: id.clone(),
+                        outcome: ApprovalOutcome::Allowed,
+                    });
+                    continue;
+                }
+            }
             // Approval bookkeeping happens here so a codec never has to track
             // what is outstanding.
             match &event {
-                SessionEvent::ApprovalRequested { id, .. } => {
-                    if !self.pending.contains(id) {
-                        self.pending.push(id.clone());
+                SessionEvent::ApprovalRequested {
+                    id, approval_kind, ..
+                } => {
+                    if !self.pending.iter().any(|(pending_id, _)| pending_id == id) {
+                        self.pending.push((id.clone(), *approval_kind));
                     }
                 }
                 SessionEvent::ApprovalResolved { id, .. } => {
-                    self.pending.retain(|p| p != id);
+                    self.pending.retain(|(pending_id, _)| pending_id != id);
                 }
                 _ => {}
             }
@@ -375,7 +531,11 @@ impl Pump {
 
     /// Records that a request is settled and tells the consumer.
     fn settle(&mut self, id: &str, outcome: ApprovalOutcome) {
-        if let Some(at) = self.pending.iter().position(|p| p == id) {
+        if let Some(at) = self
+            .pending
+            .iter()
+            .position(|(pending_id, _)| pending_id == id)
+        {
             self.pending.remove(at);
             self.emit(SessionEvent::ApprovalResolved {
                 id: id.to_owned(),
@@ -386,9 +546,10 @@ impl Pump {
 
     fn finish_turn(&mut self) {
         self.busy = false;
+        self.awaiting_start = None;
         self.cancelling = false;
         // A turn cannot end with a question still on screen.
-        for id in std::mem::take(&mut self.pending) {
+        for (id, _) in std::mem::take(&mut self.pending) {
             self.emit(SessionEvent::ApprovalResolved {
                 id,
                 outcome: ApprovalOutcome::Cancelled,

@@ -61,10 +61,10 @@ export function SearchDialog({ onClose, onOpenSession }: {
   return createPortal(<div className="search-overlay" onMouseDown={(event) => {
     if (event.target === event.currentTarget) onClose();
   }}>
-    <section className="search-dialog" ref={dialog} role="dialog" aria-modal="true" aria-label="Search every conversation">
+    <section className="search-dialog" ref={dialog} role="dialog" aria-modal="true" aria-label="Search all chats">
       <header className="search-dialog__head"><Icon name="search" size={19} />
-        <input ref={input} role="combobox" aria-label="Search every conversation" aria-autocomplete="list"
-          aria-expanded={results.length > 0} aria-haspopup="listbox" placeholder="Search every conversation…" value={query}
+        <input ref={input} role="combobox" aria-label="Search all chats" aria-autocomplete="list"
+          aria-expanded={results.length > 0} aria-haspopup="listbox" placeholder="Search all chats…" value={query}
           aria-controls="thread-search-results" aria-activedescendant={results[selected] ? `thread-search-hit-${selected}` : undefined}
           onChange={(event) => { void search(event.target.value); }}
           onKeyDown={(event) => {
@@ -80,19 +80,19 @@ export function SearchDialog({ onClose, onOpenSession }: {
       <div className="search-dialog__body">
         {error && <p className="ws-error" role="alert">{error}</p>}
         {!query.trim() ? <p className="search-dialog__empty">Find a message from any project or chat.</p>
-          : results.length === 0 ? <p className="search-dialog__empty" role="status">{searching ? "Searching…" : "No conversations matched."}</p>
-          : <ul className="search-results" role="listbox" id="thread-search-results" aria-label="Matching conversations">
+          : results.length === 0 ? <p className="search-dialog__empty" role="status">{searching ? "Searching…" : <>No chats match this search. <button type="button" className="ws-link" onClick={() => { void search(""); input.current?.focus(); }}>Clear search</button></>}</p>
+          : <ul className="search-results" role="listbox" id="thread-search-results" aria-label="Matching chats">
             {results.map((hit, index) => <li key={`${hit.sessionId}:${hit.seq}`} role="presentation">
               <button type="button" role="option" aria-selected={selected === index} id={`thread-search-hit-${index}`} className={`search-hit${selected === index ? " is-selected" : ""}`}
                 onFocus={() => setSelected(index)} onClick={() => open(index)}>
-                <span className="search-hit__title">{hit.title ?? "Untitled thread"}</span>
+                <span className="search-hit__title">{hit.title ?? "New chat"}</span>
                 <span className="search-hit__snippet">{hit.snippet}</span>
                 <span className="search-hit__meta">{hit.projectName} · {hit.harness === "claude" ? "Claude" : "Codex"}</span>
               </button>
             </li>)}
           </ul>}
       </div>
-      <footer className="search-dialog__foot"><span>Searches the full conversation history</span><span>↑ ↓ to select · Enter to open</span></footer>
+      <footer className="search-dialog__foot"><span>Searches every message in every chat</span><span>↑ ↓ to select · Enter to open</span></footer>
     </section>
   </div>, document.body);
 }

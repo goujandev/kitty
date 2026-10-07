@@ -5,7 +5,14 @@ import ts from 'typescript';
 
 const source = readFileSync(new URL('../src/views/activity.ts', import.meta.url), 'utf8');
 const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
-const { groupActivity, formatElapsed } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
+const { groupActivity, formatElapsed, savedContextNote } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
+
+test('missing saved context is a quiet history note while real errors remain visible', () => {
+  assert.match(savedContextNote('Agent error', 'no rollout found for thread id missing-thread'), /saved chat history is kept/);
+  assert.equal(savedContextNote('Agent error', 'authentication failed'), null);
+  assert.equal(savedContextNote('Agent error', 'no rollout found for thread id'), null);
+  assert.equal(savedContextNote('Run check', 'no rollout found for thread id missing-thread'), null);
+});
 const block = (seq, kind, text = '') => ({ seq, kind, text, meta: null, createdAt: 1000 });
 
 test('completed work groups commentary, reasoning and tools while preserving the final answer', () => {

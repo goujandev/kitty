@@ -1,0 +1,187 @@
+/* The frame: a dark shell around one rounded panel, a dithered wallpaper in
+   the panel, and a composer floating over it with no outline. With a
+   wallpaper the shell, accent and composer take their tint from the picture
+   (Wallpaper.tsx sets --wall-*); without one, the theme's own colours. */
+:root {
+  --frame-shell: var(--sidebar-bg);
+  --frame-panel: var(--bg);
+  --frame-accent: var(--accent);
+  --frame-on-accent: var(--on-accent);
+  --frame-surface: color-mix(in srgb, var(--panel) 92%, transparent);
+  --frame-gap: 8px;
+  --frame-radius: 14px;
+}
+:root[data-wallpaper] {
+  --frame-shell: var(--wall-shell);
+  --frame-panel: var(--wall-panel);
+  --frame-accent: var(--wall-accent);
+  --frame-on-accent: #0b0b0b;
+  --frame-surface: var(--wall-surface);
+}
+/* Light themes keep their light shell; the picture tints only the accent. */
+:root[data-wallpaper][data-theme="light"],
+:root[data-wallpaper][data-theme="solarized-light"] {
+  --frame-shell: var(--sidebar-bg);
+  --frame-panel: var(--bg);
+  --frame-surface: color-mix(in srgb, var(--panel) 90%, transparent);
+  --frame-accent: color-mix(in srgb, var(--wall-accent) 55%, #000);
+  --frame-on-accent: #fff;
+}
+
+/* ------------------------------------------------------------------ shell */
+.workspace { background: var(--frame-shell); }
+.workspace .ws-sidebar--projects { background: transparent; border-right: 0; }
+.workspace__main { padding: 0 var(--frame-gap) var(--frame-gap) 0; background: transparent; }
+/* Sidebar closed: it is gone entirely, and the panel gets an even margin. */
+.workspace--collapsed .workspace__main { padding-left: var(--frame-gap); }
+.workspace--collapsed .workspace-tabs { padding-left: 0; }
+.workspace-tabs__sidebar { flex: none; }
+.workspace .workspace-tabs { height: 40px; padding: 0 0 0 4px; background: transparent; border: 0; }
+
+/* The panel: everything below the title bar, inset and rounded. */
+.workspace .chat,
+.workspace .project-chooser {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--frame-radius);
+  background: var(--frame-panel);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 5%, transparent);
+}
+.workspace .canvas { background: transparent; }
+
+/* -------------------------------------------------------------- wallpaper */
+.wallpaper { position: absolute; inset: 0; overflow: hidden; pointer-events: none; isolation: isolate; }
+.wallpaper__dither { position: absolute; top: 0; left: 0; image-rendering: pixelated; }
+.wallpaper__noise, .wallpaper__fade, .wallpaper__hush { position: absolute; inset: 0; }
+/* Fine monochrome grain over the dither, one CSS pixel to a grain. */
+.wallpaper__noise { background-size: 128px 128px; image-rendering: pixelated; opacity: .22; mix-blend-mode: soft-light; }
+/* The last stretch onto the panel colour, so the bottom edge has no seam. */
+/* Darkening laid over the dither rather than baked into it, so the dot
+   texture is still there in the shadows, as in the reference: the lower part
+   of the panel sinks towards the shell colour from just above the composer
+   down. */
+.wallpaper__fade {
+  --shade: var(--frame-shell);
+  background: linear-gradient(to bottom,
+    transparent 0%,
+    transparent 44%,
+    color-mix(in srgb, var(--shade) 52%, transparent) 55%,
+    color-mix(in srgb, var(--shade) 80%, transparent) 66%,
+    color-mix(in srgb, var(--shade) 90%, transparent) 80%,
+    color-mix(in srgb, var(--shade) 95%, transparent) 100%);
+}
+.wallpaper__hush { background: var(--frame-panel); opacity: 0; transition: opacity .45s ease; }
+.wallpaper--dim .wallpaper__hush { opacity: .86; }
+@media (prefers-reduced-motion: reduce) { .wallpaper__hush { transition: none; } }
+
+/* -------------------------------------------------------------- composer */
+/* A new chat: the composer sits a little below the middle, over the picture. */
+.workspace .chat--blank .dock { margin-top: auto; margin-bottom: max(22vh, 96px); padding-bottom: 0; isolation: isolate; }
+/* A soft pool of shadow around the composer, wider than it is tall, so the
+   box sits in a darker patch of the picture. */
+:root[data-wallpaper] .workspace .chat--blank .dock::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  top: 50%;
+  width: calc(100% + 760px);
+  height: calc(100% + 380px);
+  transform: translate(-50%, -46%);
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--frame-shell) 94%, transparent) 0%,
+    color-mix(in srgb, var(--frame-shell) 86%, transparent) 45%,
+    color-mix(in srgb, var(--frame-shell) 55%, transparent) 72%,
+    transparent 100%);
+  pointer-events: none;
+}
+.workspace .composer { max-width: min(var(--column), 100%); }
+.workspace .composer__box {
+  border: 0;
+  border-radius: 12px;
+  background: var(--frame-surface);
+  -webkit-backdrop-filter: blur(16px) saturate(1.15);
+  backdrop-filter: blur(16px) saturate(1.15);
+  box-shadow: 0 18px 50px rgb(0 0 0 / 38%);
+}
+/* Never highlighted, typing or not: the caret is enough. */
+.workspace .composer__box:focus-within { border: 0; outline: 0; box-shadow: 0 18px 50px rgb(0 0 0 / 38%); }
+.workspace .composer__input:focus, .workspace .composer__input:focus-visible { outline: 0; box-shadow: none; }
+.workspace .composer__body { padding: 14px 16px 6px; }
+.workspace .composer__input { min-height: 56px; font-size: 15px; line-height: 24px; }
+.workspace .composer__tools { min-height: 48px; padding: 0 10px 10px 12px; }
+.workspace .composer__choices { gap: 4px; }
+.workspace .composer__choices > .pop + .pop::before { display: none; }
+.workspace .composer__choices .chip { height: 30px; padding: 0 8px; font-size: 14px; color: var(--muted); }
+.workspace .composer__choices .chip.chip--model { color: var(--frame-accent); font-weight: 500; }
+.workspace .composer__choices .chip.chip--model svg { color: var(--frame-accent); fill: currentColor; }
+.workspace .composer__choices .chip.chip--settings { width: 30px; padding: 0; justify-content: center; }
+.workspace .composer__choices .chip:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 7%, transparent); color: var(--text); }
+.workspace .composer__choices .chip.chip--model:hover:not(:disabled) { color: var(--frame-accent); }
+.workspace .composer__send {
+  width: 32px; height: 32px;
+  border: 0; border-radius: 8px;
+  background: var(--frame-accent);
+  color: var(--frame-on-accent);
+}
+.workspace .composer__send:disabled { opacity: .75; }
+.workspace .composer__send:hover:not(:disabled) { filter: brightness(1.08); }
+
+/* Project and folder, small and quiet, just above the box. */
+.workspace .composer__context {
+  display: flex; align-items: center;
+  margin: 0 0 8px; padding: 0 6px;
+  border: 0; border-radius: 0; background: transparent;
+}
+.workspace .composer__context .contextrow { display: flex; align-items: center; gap: 6px; max-width: none; min-height: 28px; padding: 0; }
+.workspace .chip.chip--context {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 8px;
+  border: 0; border-radius: 6px; background: transparent;
+  color: color-mix(in srgb, var(--text) 82%, transparent);
+  font-size: 14px; font-weight: 500; line-height: 20px;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 60%);
+}
+.workspace .chip.chip--context svg { flex: none; }
+.workspace button.chip--context:hover { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+.workspace .chip--static { cursor: default; color: var(--muted); }
+
+/* Narrow windows keep the frame but tighten it. */
+@media (max-width: 640px) {
+  :root { --frame-gap: 6px; --frame-radius: 12px; }
+  .workspace .chat--blank .dock { margin-bottom: 64px; }
+}
+
+/* The open chat takes the wallpaper's colour, so the sidebar and the composer
+   read as one design. */
+:root[data-wallpaper] .workspace .ws-sidebar--projects { --row-active: color-mix(in srgb, var(--frame-accent) 15%, transparent); }
+
+/* ------------------------------------------------------------------- tabs */
+/* The open chats in the title bar, like the reference's tab strip: the
+   active one a soft filled pill, the rest quiet until hovered. */
+.workspace .workspace-tabs { gap: 6px; }
+.tabbar { display: flex; align-items: center; gap: 2px; flex: 0 1 auto; min-width: 0; height: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.tabbar::-webkit-scrollbar { display: none; }
+.tab { position: relative; display: flex; align-items: center; flex: 0 1 220px; min-width: 96px; max-width: 220px; height: 30px; border-radius: 8px; color: var(--muted); }
+.tab:hover { background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text); }
+.tab.is-active {
+  background: color-mix(in srgb, var(--frame-surface) 100%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+}
+.tab__open { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; height: 100%; padding: 0 30px 0 10px; border: 0; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 14px; line-height: 20px; text-align: left; }
+.tab.is-active .tab__open { font-weight: 500; }
+.tab__open > svg, .tab__open > .mark { flex: none; }
+.tab__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab__state { display: inline-grid; place-items: center; flex: none; color: var(--blocked); }
+.tab__close { position: absolute; right: 4px; top: 50%; display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; transform: translateY(-50%); }
+.tab:hover .tab__close, .tab.is-active .tab__close, .tab__close:focus-visible { opacity: 1; }
+.tab__close:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }
+.tab__rename { flex: 1; padding: 0 4px; }
+.tab__rename .inline-rename__input { height: 26px; font-size: 14px; }
+.tabbar__new { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; margin-left: 2px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.tabbar__new:hover { background: color-mix(in srgb, var(--text) 6%, transparent); color: var(--text); }
+.tabbar button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+@media (max-width: 640px) {
+  .tab { flex-basis: 150px; min-width: 72px; }
+}

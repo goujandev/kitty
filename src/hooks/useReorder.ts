@@ -31,6 +31,7 @@ export function useReorder<T>(
   source: T[],
   idOf: (item: T) => string,
   onCommit: (ids: string[]) => void,
+  canMove?: (from: T, to: T) => boolean,
 ): Reorder<T> {
   const [dragging, setDragging] = useState<string | null>(null);
   // Only set while a drag is live. Falling back to `source` the rest of the
@@ -52,13 +53,18 @@ export function useReorder<T>(
         const at = ids.indexOf(from);
         const target = ids.indexOf(to);
         if (at < 0 || target < 0 || at === target) return ids;
+        if (canMove) {
+          const fromItem = source.find(item => idOf(item) === from);
+          const toItem = source.find(item => idOf(item) === to);
+          if (!fromItem || !toItem || !canMove(fromItem, toItem)) return ids;
+        }
         const next = [...ids];
         next.splice(at, 1);
         next.splice(target, 0, from);
         return next;
       });
     },
-    [source, idOf],
+    [source, idOf, canMove],
   );
 
   const finish = useCallback(() => {

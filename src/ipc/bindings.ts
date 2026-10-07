@@ -221,6 +221,8 @@ export interface SessionRow {
   title: string | null;
   createdAt: number;
   updatedAt: number;
+  /** When Kitty archived the chat; null while it is in the list. */
+  archivedAt: number | null;
 }
 
 /** One model, as its CLI describes it. */
@@ -263,6 +265,13 @@ export interface RailWidths {
 }
 
 /** A project with enough context to decide whether to keep it. */
+/** A folder added as a project, and whether it was already one. */
+export interface OpenedProject {
+  project: Project;
+  /** False when the folder was already a project, which was selected instead. */
+  created: boolean;
+}
+
 export interface ProjectSummary extends Project {
   sessionCount: number;
   /** False when the folder has been moved or deleted since it was opened. */

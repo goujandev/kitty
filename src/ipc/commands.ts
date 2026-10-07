@@ -14,6 +14,7 @@ import type {
   Hit,
   ModelCatalog,
   ModelChoice,
+  OpenedProject,
   Project,
   ProjectSummary,
   RailWidths,
@@ -50,7 +51,7 @@ export function pickFolder(): Promise<string | null> {
 // ------------------------------------------------------------- appearance
 
 /** How the window is painted. */
-export type Theme = "system" | "light" | "dark";
+export type Theme = "system" | "light" | "dark" | "nord" | "catppuccin-mocha" | "solarized-light";
 
 export function theme(): Promise<Theme> {
   return invoke<Theme>("theme");
@@ -105,8 +106,17 @@ export function clearBackground(): Promise<void> {
 
 // --------------------------------------------------------------- projects
 
-export function openProject(path: string): Promise<Project> {
-  return invoke<Project>("open_project", { path });
+/**
+ * Adds a folder as a project. A folder that already is one comes back with
+ * `created: false` and is selected rather than duplicated.
+ */
+export function openProject(path: string): Promise<OpenedProject> {
+  return invoke<OpenedProject>("open_project", { path });
+}
+
+/** Renames a project in Kitty. The folder on disk keeps its name. */
+export function renameProject(projectId: string, name: string): Promise<Project> {
+  return invoke<Project>("rename_project", { projectId, name });
 }
 
 /** Opens a project already in the list. Works with or without a folder. */
@@ -217,9 +227,19 @@ export function createSession(
   return invoke<SessionRow>("create_session", { projectId, harness });
 }
 
-/** Forgets one conversation and its transcript. */
+/** Forgets one conversation and its transcript. Project files are untouched. */
 export function deleteSession(sessionId: string): Promise<void> {
   return invoke<void>("delete_session", { sessionId });
+}
+
+/** Renames a chat. Kitty's title only; the provider is not told. */
+export function renameSession(sessionId: string, title: string): Promise<SessionRow> {
+  return invoke<SessionRow>("rename_session", { sessionId, title });
+}
+
+/** Archives a chat, or restores it. History and provider session are kept. */
+export function archiveSession(sessionId: string, archived: boolean): Promise<SessionRow> {
+  return invoke<SessionRow>("archive_session", { sessionId, archived });
 }
 
 export function sessionBlocks(sessionId: string): Promise<Block[]> {
@@ -229,6 +249,19 @@ export function sessionBlocks(sessionId: string): Promise<Block[]> {
 /** Starts the CLI for a session. Safe to call on an already-running one. */
 export function startSession(sessionId: string): Promise<void> {
   return invoke<void>("start_session", { sessionId });
+}
+
+/** Keeps Kitty history but opens new provider context without replaying work. */
+export function restartSessionThread(sessionId: string): Promise<void> {
+  return invoke<void>("restart_session_thread", { sessionId });
+}
+
+export type ApprovalMode = "ask" | "edits" | "auto";
+export function getApprovalMode(sessionId: string): Promise<ApprovalMode> {
+  return invoke<ApprovalMode>("get_approval_mode", { sessionId });
+}
+export function setApprovalMode(sessionId: string, mode: ApprovalMode): Promise<void> {
+  return invoke<void>("set_approval_mode", { sessionId, mode });
 }
 
 /** Sends a turn. Resolves with the sequence number of the user's block. */
@@ -257,6 +290,16 @@ export function search(query: string): Promise<Hit[]> {
   return invoke<Hit[]>("search", { query });
 }
 
+/** A chat's short, agent-written title, arriving after its first message. */
+export interface SessionTitle {
+  sessionId: string;
+  projectId: string;
+  title: string;
+}
+
+export function onSessionTitle(handler: (update: SessionTitle) => void): Promise<UnlistenFn> {
+  return listen<SessionTitle>("kitty://session-title", (event) => handler(event.payload));
+}
 /**
  * Subscribes to transcript batches.
  *

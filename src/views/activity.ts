@@ -1,5 +1,12 @@
 import type { Block } from "../ipc/bindings";
 
+/** Older saved recovery diagnostics are history notes, not current failures. */
+export function savedContextNote(title: string, detail: string | null): string | null {
+  return title === "Agent error" && detail !== null && /^no rollout found for thread id [a-zA-Z0-9-]+$/.test(detail.trim())
+    ? "An earlier agent context was unavailable. Your saved chat history is kept."
+    : null;
+}
+
 export interface TurnTiming {
   startedAt: number;
   endedAt?: number;
