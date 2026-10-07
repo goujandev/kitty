@@ -11,6 +11,11 @@ closest existing product. Prototype scope is in `PROTOTYPE-1.md`.
 Status: planning. No code exists yet. Types below illustrate boundaries; they
 are not final signatures.
 
+Implementation note (2026-10-07): the current app includes a Rust-owned local
+dictation prototype using Handy's speech stack. See [DICTATION.md](DICTATION.md)
+for its lifecycle and typed commands. The older planning sections below do not
+describe that feature.
+
 ---
 
 ## 1. What kitty is

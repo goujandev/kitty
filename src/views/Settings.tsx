@@ -20,6 +20,8 @@ import { Icon } from "./Icon";
 import { UpdateSettings } from "./UpdateSettings";
 import t3License from "../../docs/licenses/T3-Code-MIT.txt?raw";
 import lucideLicense from "../../docs/licenses/Lucide-LICENSE.txt?raw";
+import handyLicense from "../../docs/licenses/Handy-MIT.txt?raw";
+import dictationLicenses from "../../docs/licenses/Dictation-LICENSES.txt?raw";
 
 /**
  * Settings.
@@ -61,7 +63,7 @@ export function SettingsDialog({ section, onSelect, onClose }: {
         <nav className="settings-dialog__nav" aria-label="Settings sections">
           {SECTIONS.map(entry => <button type="button" key={entry.id} className={entry.id === section ? "is-active" : ""} aria-current={entry.id === section ? "page" : undefined} onClick={() => onSelect(entry.id)}><Icon name={entry.id === "appearance" ? "panel" : entry.id === "updates" ? "arrow" : "sparkles"} />{entry.name}</button>)}
         </nav>
-        <div className="settings-dialog__content"><h3>{SECTIONS.find(entry => entry.id === section)?.name}</h3>{section === "agents" ? <AgentSettings /> : section === "updates" ? <UpdateSettings /> : <AppearanceSettings />}<details className="settings-credits"><summary>Open-source credits</summary><p>Interface elements adapted from T3 Code.</p><pre>{t3License}</pre><p>Lucide icons</p><pre>{lucideLicense}</pre></details></div>
+        <div className="settings-dialog__content"><h3>{SECTIONS.find(entry => entry.id === section)?.name}</h3>{section === "agents" ? <AgentSettings /> : section === "updates" ? <UpdateSettings /> : <AppearanceSettings />}<details className="settings-credits"><summary>Open-source credits</summary><p>Interface elements adapted from T3 Code.</p><pre>{t3License}</pre><p>Lucide icons</p><pre>{lucideLicense}</pre><p>Local dictation adapted from Handy.</p><pre>{handyLicense}</pre><p>Speech model and recognition dependencies</p><pre>{dictationLicenses}</pre></details></div>
       </div>
     </div>
   </div>;

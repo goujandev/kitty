@@ -26,6 +26,38 @@ import type {
 /** The event the host emits for every session. */
 const TRANSCRIPT_EVENT = "kitty://transcript";
 
+// --------------------------------------------------------------- dictation
+
+/** Local speech activity only; partial recognized text never crosses IPC. */
+export interface DictationStatus {
+  id: string | null;
+  phase: "idle" | "preparing" | "recording" | "transcribing" | "error";
+  ready: boolean;
+  /** Fraction of initial speech-pack preparation, from 0 to 1. */
+  progress: number | null;
+  error: string | null;
+  /** Recent microphone volume, oldest first, normalized to 0–1; empty unless recording. */
+  waveform: number[];
+}
+
+export function dictationStatus(): Promise<DictationStatus> {
+  return invoke<DictationStatus>("dictation_status");
+}
+
+/** First use prepares the speech pack before opening the microphone. */
+export function dictationStart(id: string): Promise<void> {
+  return invoke<void>("dictation_start", { id });
+}
+
+/** Stops capture and returns only the complete recognized text. */
+export function dictationFinish(id: string): Promise<string> {
+  return invoke<string>("dictation_finish", { id });
+}
+
+export function dictationCancel(id: string): Promise<void> {
+  return invoke<void>("dictation_cancel", { id });
+}
+
 // -------------------------------------------------------------- harnesses
 
 /** The last completed scan, or null if nothing has been scanned yet. */

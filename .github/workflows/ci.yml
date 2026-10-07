@@ -39,6 +39,12 @@ jobs:
       - name: Update flow and release configuration
         run: npm run test:updates
 
+      - name: Dictation interactions
+        run: npm run test:dictation
+
+      - name: Prepare verified bundled dictation resources
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-dictation-pack.ps1
+
       - name: Formatting
         run: cargo fmt --all --check
 

@@ -18,6 +18,17 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 base64 = "0.22"
+cpal = "0.16"
+flate2 = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+tokio = { version = "1", features = ["time", "macros"] }
+rubato = "0.16"
+sha2 = "0.10"
+tar = "0.4"
+transcribe-rs = { version = "=0.3.8", features = ["onnx"] }
+# Load the baseline CPU runtime only on deliberate dictation use.
+ort = { version = "=2.0.0-rc.12", features = ["load-dynamic"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 kitty-catalog = { workspace = true }
 kitty-core = { workspace = true }
 kitty-engine = { workspace = true }
@@ -33,4 +44,6 @@ tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 
 [dev-dependencies]
+hound = "3.5"
+tempfile = "3"
 minisign-verify = "0.2.5"

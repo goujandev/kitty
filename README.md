@@ -67,9 +67,29 @@ context and quietly keeps your visible chat history. It never replays old reques
 Other startup failures remain visible; **Start fresh agent context** is still
 available for manual recovery when appropriate.
 
+## Local dictation
+
+Press the microphone beside Send to record. Kitty shows activity and keeps the
+recognized words hidden until you finish. The microphone becomes a Stop button;
+press Stop to put the
+finished text into the message box for editing, or press Send while recording
+to finish transcription and send directly. The X beside the waveform or Escape discards the
+recording and keeps your original draft. Changing chats also cancels dictation.
+
+The Windows installer includes the speech model and runtime. First use prepares
+these installed files locally; dictation requires no separate download, account
+or API key. Kitty uses Handy's English Moonshine Small recognition stack, with
+no LLM cleanup, and supports English recordings up to two minutes.
+The microphone closes after recording and the model unloads after recognition.
+See [implementation and validation](docs/DICTATION.md) for limits and attribution.
+
+During recording, a live volume waveform fills the space between the model
+controls and Stop. It shows incoming audio without displaying words. These controls
+use the existing footer, keeping the prompt box the same height.
+
 ## Develop
 
-On Windows, install Node.js, Rust with the MSVC toolchain, and Microsoft C++ Build Tools with the Windows SDK. See the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#windows).
+On Windows, install Node.js, Rust 1.88 or later with the MSVC toolchain, and Microsoft C++ Build Tools with the Windows SDK. See the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#windows).
 
 ```powershell
 npm ci
@@ -77,6 +97,11 @@ npm start
 ```
 
 For quick visual work, `npm run dev` opens the real interface in an ordinary browser at http://localhost:1420. A development-only pretend host supplies sample projects, chats and streamed replies, and edits appear immediately. To preview your own wallpaper there, copy it to `preview-local/background.jpg` (gitignored) or choose one in Settings › Appearance. The pretend host is never included in builds.
+
+Windows builds prepare the pinned speech pack with
+`scripts/prepare-dictation-pack.ps1`. The script verifies archive hashes, includes
+licensing notices and creates ignored resources for the installer. Build machines
+need network access once; the verified archives are then cached under `target`.
 
 To build the Windows installer:
 

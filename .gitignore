@@ -7,6 +7,7 @@
 # Tauri build output
 /src-tauri/target
 /src-tauri/gen
+/src-tauri/resources/dictation
 
 # Generated IPC bindings are committed on purpose; see docs/adr/0001.
 # Nothing else generated is.

@@ -3,9 +3,9 @@ resolver = "2"
 members = ["crates/core", "crates/probe", "crates/supervisor", "crates/harness", "crates/engine", "crates/store", "crates/catalog", "src-tauri"]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 repository = "https://github.com/goujan/kitty"
 

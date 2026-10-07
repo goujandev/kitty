@@ -24,6 +24,14 @@ Users of versions without the updater manually install v0.1.1 once. Subsequent r
 
 ## Local build
 
+As of v0.2.2, the installer includes local dictation's pinned speech model and CPU
+runtime. The Tauri pre-build command runs `scripts/prepare-dictation-pack.ps1`:
+it verifies archive hashes, stages allowlisted resources plus licences, and
+reuses cached downloads under `target/dictation-pack-downloads`. Generated
+`src-tauri/resources/dictation` files stay out of Git. A fresh build machine needs
+network access for preparation; installed dictation works without a first-use
+download. All release checks must use this same resource configuration.
+
 On the machine holding the key, in PowerShell:
 
     $env:TAURI_SIGNING_PRIVATE_KEY = 'C:\Users\gouja\.tauri\kitty-updater.key'

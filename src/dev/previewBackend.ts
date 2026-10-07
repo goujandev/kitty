@@ -10,10 +10,24 @@
  * Nothing here talks to a real agent or touches a real file.
  */
 
+import type { DictationStatus } from "../ipc/commands";
+
 type Row = Record<string, unknown>;
 type Handler = (event: { event: string; id: number; payload: unknown }) => void;
 
 const now = Date.now();
+let dictation: DictationStatus = { id: null, phase: "idle", ready: true, progress: null, error: null, waveform: [] };
+let recordingStarted = 0;
+
+// Deterministic sample audio levels for visual review only, excluded from production.
+function previewWaveform(): number[] {
+  const tick = Math.floor((Date.now() - recordingStarted) / 75);
+  return Array.from({ length: 96 }, (_, index) => {
+    const position = tick - 95 + index;
+    if (position < 0 || position % 70 < 22) return 0;
+    return Math.abs(Math.sin(position * 0.27)) * (0.25 + 0.65 * Math.abs(Math.sin(position * 0.08)));
+  });
+}
 const minutes = (n: number) => now - n * 60_000;
 
 const projects: Row[] = [
@@ -158,6 +172,32 @@ async function command(cmd: string, args: Record<string, unknown>): Promise<unkn
     case "plugin:event|unlisten": return null;
     case "plugin:app|version": return "0.1.2-preview";
     case "harness_snapshot": case "harness_rescan": return scan;
+    // Simulated activity for reviewing the composer. The browser preview never
+    // opens a microphone or loads the native speech engine.
+    case "dictation_status": return { ...dictation, waveform: dictation.phase === "recording" ? previewWaveform() : [] };
+    case "dictation_start": {
+      const id = String(args.id);
+      if (dictation.id) throw new Error("Dictation is already in use.");
+      dictation = { ...dictation, id, phase: "preparing" };
+      await new Promise(resolve => setTimeout(resolve, 500));
+      if (dictation.id !== id) throw new Error("Dictation was cancelled.");
+      dictation.phase = "recording";
+      recordingStarted = Date.now();
+      return null;
+    }
+    case "dictation_finish": {
+      const id = String(args.id);
+      if (dictation.id !== id || dictation.phase !== "recording") throw new Error("Dictation is no longer recording.");
+      dictation.phase = "transcribing";
+      await new Promise(resolve => setTimeout(resolve, 900));
+      if (dictation.id !== id) throw new Error("Dictation was cancelled.");
+      dictation = { ...dictation, id: null, phase: "idle" };
+      return "This is a dictation preview. The Windows prototype uses your microphone.";
+    }
+    case "dictation_cancel": {
+      if (dictation.id === String(args.id)) dictation = { ...dictation, id: null, phase: "idle", progress: null, error: null };
+      return null;
+    }
     case "theme": return settings.theme;
     case "set_theme": settings.theme = String(args.theme); return null;
     case "zoom": return settings.zoom;

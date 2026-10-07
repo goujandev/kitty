@@ -1,0 +1,29 @@
+.dictation-mic, .dictation-discard {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+.dictation-mic:hover:not(:disabled), .dictation-discard:hover { color: var(--text); background: color-mix(in srgb, var(--text) 14%, transparent); }
+.dictation-mic--active, .dictation-discard { color: var(--text); background: color-mix(in srgb, var(--text) 8%, transparent); border-radius: 50%; }
+.dictation-discard { width: 30px; height: 30px; }
+.dictation-mic__spinner { width: 14px; height: 14px; border-color: color-mix(in srgb, var(--text) 20%, transparent); border-top-color: var(--text); }
+.dictation-mic:disabled { opacity: .45; cursor: default; }
+.dictation-mic:focus-visible, .dictation-discard:focus-visible, .dictation-status__cancel:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.dictation-status { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 14px 8px; color: var(--muted); font-size: 12px; line-height: 18px; }
+.dictation-status > span { min-width: 0; overflow-wrap: anywhere; }
+.dictation-status--hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.dictation-status__cancel { flex: none; margin-left: auto; padding: 3px 5px; border: 0; border-radius: 4px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.dictation-status__cancel:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.composer__tools--dictating .composer__choices { flex: 0 1 auto; flex-wrap: nowrap; max-width: calc(100% - 180px); }
+.dictation-waveform { display: flex; justify-content: flex-end; flex: 1 1 0; min-width: 48px; height: 32px; color: var(--muted); overflow: hidden; }
+/* Clip the oldest history at narrow widths instead of shrinking bars into subpixels. */
+.dictation-waveform svg { display: block; flex: none; width: 100%; min-width: 560px; height: 100%; fill: currentColor; }
+/* Volume is sampled directly; there is no decorative motion, including in reduced-motion mode. */

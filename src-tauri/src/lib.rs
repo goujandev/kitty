@@ -8,6 +8,7 @@
 //! the window and returns; the frontend asks for what it needs once it has
 //! painted.
 
+mod dictation;
 mod sessions;
 mod titles;
 
@@ -1391,6 +1392,13 @@ fn open_store(app: &tauri::App) -> (Arc<Store>, Option<String>) {
 /// add a hop.
 pub fn run() {
     let result = tauri::Builder::default()
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed) {
+                if let Some(state) = window.try_state::<dictation::DictationState>() {
+                    state.cancel_all();
+                }
+            }
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -1402,6 +1410,10 @@ pub fn run() {
             picture_response(request.uri().path())
         })
         .invoke_handler(tauri::generate_handler![
+            dictation::dictation_status,
+            dictation::dictation_start,
+            dictation::dictation_finish,
+            dictation::dictation_cancel,
             harness_snapshot,
             harness_rescan,
             pick_folder,
@@ -1449,6 +1461,7 @@ pub fn run() {
             search,
         ])
         .setup(|app| {
+            app.manage(dictation::DictationState::default());
             app.get_webview_window("main")
                 .ok_or("the main window is missing from tauri.conf.json")?;
 
