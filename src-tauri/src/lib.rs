@@ -17,10 +17,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use kitty_core::{HarnessId, InstallState, ModelCatalog, Scan};
-use kitty_engine::{ApprovalMode, Session, SessionSpec};
-use kitty_probe::EnvSnapshot;
-use kitty_store::{Block, Hit, Project, SessionRow, Store};
+use pantheon_core::{HarnessId, InstallState, ModelCatalog, Scan};
+use pantheon_engine::{ApprovalMode, Session, SessionSpec};
+use pantheon_probe::EnvSnapshot;
+use pantheon_store::{Block, Hit, Project, SessionRow, Store};
 use tauri::{Manager, State};
 
 use sessions::{Live, Registry};
@@ -46,7 +46,7 @@ struct AppState {
 /// Codex generates images itself and writes them to
 /// `~/.codex/generated_images/<thread>/<call-id>.png`; Claude's tools and MCP
 /// servers write wherever they were pointed. The transcript is model output,
-/// so the path in it is model output too, and a path kitty will open on the
+/// so the path in it is model output too, and a path pantheon will open on the
 /// strength of a sentence is a path the model chooses.
 ///
 /// Hence a list. Nothing outside these roots is served, whatever the text
@@ -58,7 +58,7 @@ fn picture_roots() -> Vec<PathBuf> {
         roots.push(home.join(".codex"));
         roots.push(home.join(".claude"));
     }
-    // Pictures the user attached, as kitty's own copies.
+    // Pictures the user attached, as pantheon's own copies.
     if let Some(dir) = attachments::root() {
         roots.push(dir.to_path_buf());
     }
@@ -76,7 +76,7 @@ fn picture_mime(path: &Path) -> Option<&'static str> {
         .map(|(_, mime)| *mime)
 }
 
-/// Whether kitty will show the file at `path`, and as what.
+/// Whether pantheon will show the file at `path`, and as what.
 ///
 /// Both halves matter. The root check stops the transcript naming a file
 /// outside the agents' own folders; `canonicalize` is what makes it a check
@@ -170,7 +170,7 @@ async fn harness_rescan(state: State<'_, AppState>) -> Result<Scan, String> {
     let scan = tauri::async_runtime::spawn_blocking(|| {
         let started = std::time::Instant::now();
         let env = EnvSnapshot::capture();
-        let harnesses = kitty_probe::probe_all(&env);
+        let harnesses = pantheon_probe::probe_all(&env);
         Scan {
             harnesses,
             duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
@@ -235,7 +235,7 @@ fn open_project_inner(state: &AppState, path: &str) -> Result<OpenedProject, Str
     Ok(OpenedProject { project, created })
 }
 
-/// Renames a project in Kitty. Never renames or moves its folder.
+/// Renames a project in Pantheon. Never renames or moves its folder.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 fn rename_project(
@@ -264,7 +264,7 @@ fn new_chat(state: State<'_, AppState>) -> Result<Project, String> {
         .map_err(|e| fail("could not start a new chat", e))
 }
 
-/// Opens a project kitty already knows about, by id.
+/// Opens a project pantheon already knows about, by id.
 ///
 /// The rail has the whole row in hand, so it has no reason to hand back a path
 /// and make the host look it up again -- and a project with no folder has no
@@ -370,9 +370,9 @@ fn list_project_summaries(state: State<'_, AppState>) -> Result<Vec<ProjectSumma
         .collect())
 }
 
-/// Forgets a project and every conversation Kitty stored for it.
+/// Forgets a project and every conversation Pantheon stored for it.
 ///
-/// Only Kitty's records go. The folder, its files and the providers' own
+/// Only Pantheon's records go. The folder, its files and the providers' own
 /// session records are never touched; nothing here deletes from disk.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
@@ -400,7 +400,7 @@ fn remove_project_inner(state: &AppState, project_id: &str) -> Result<(), String
 /// How long a cached model list is trusted before being refreshed.
 const CATALOG_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
-/// Bumped whenever kitty changes how it reads a CLI's answer.
+/// Bumped whenever pantheon changes how it reads a CLI's answer.
 ///
 /// The cache holds the *parsed* catalog, not the raw reply, so a change to the
 /// parsing does not show up until the entry expires a day later. That is how a
@@ -429,7 +429,7 @@ async fn list_models(
     let harness = parse_harness(&harness)?;
 
     let env = EnvSnapshot::capture();
-    let status = kitty_probe::probe_one(harness, &env);
+    let status = pantheon_probe::probe_one(harness, &env);
     let InstallState::Found { path, version } = &status.install else {
         return Err(format!(
             "{} is not available: {}",
@@ -453,7 +453,7 @@ async fn list_models(
     let stamp = version.clone();
 
     let catalog = tauri::async_runtime::spawn_blocking(move || {
-        kitty_catalog::probe(harness, std::path::Path::new(&path), &cwd, &stamp)
+        pantheon_catalog::probe(harness, std::path::Path::new(&path), &cwd, &stamp)
     })
     .await
     .map_err(|e| fail("the model probe did not finish", e))?
@@ -467,7 +467,7 @@ async fn list_models(
 
 /// Returns a cached list, if it is still trustworthy.
 fn cached_catalog(
-    store: &kitty_store::Store,
+    store: &pantheon_store::Store,
     harness: HarnessId,
     version: &str,
 ) -> Option<ModelCatalog> {
@@ -477,7 +477,7 @@ fn cached_catalog(
     if catalog.cli_version != version {
         return None;
     }
-    if kitty_store::now_ms() - catalog.fetched_at_ms > CATALOG_TTL_MS {
+    if pantheon_store::now_ms() - catalog.fetched_at_ms > CATALOG_TTL_MS {
         return None;
     }
     Some(catalog)
@@ -627,7 +627,7 @@ fn favourites_key(harness: HarnessId) -> String {
 }
 
 /// A preference is not worth an error banner, so a failure reads as "none".
-fn read_favourites(store: &kitty_store::Store, harness: HarnessId) -> Vec<String> {
+fn read_favourites(store: &pantheon_store::Store, harness: HarnessId) -> Vec<String> {
     store
         .setting("favourites", "", &favourites_key(harness))
         .ok()
@@ -685,7 +685,7 @@ fn theme(state: State<'_, AppState>) -> String {
 #[tauri::command]
 fn set_theme(state: State<'_, AppState>, theme: String) -> Result<(), String> {
     if !THEMES.contains(&theme.as_str()) {
-        return Err(format!("{theme} is not a theme kitty has"));
+        return Err(format!("{theme} is not a theme Pantheon has"));
     }
     state
         .store
@@ -821,7 +821,7 @@ fn background_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 /// Adopts an image as the background.
 ///
-/// The file is copied into kitty's own folder rather than referenced where it
+/// The file is copied into pantheon's own folder rather than referenced where it
 /// lies. A background that vanishes because the picture was moved out of
 /// Downloads is a puzzle the user should never have to solve.
 #[tauri::command]
@@ -839,7 +839,7 @@ async fn set_background(
 
     let Some((_, mime)) = IMAGE_TYPES.iter().find(|(ext, _)| *ext == extension) else {
         return Err(format!(
-            "{extension} is not an image kitty can show. Use a PNG, JPEG, WebP, GIF or BMP."
+            "{extension} is not an image Pantheon can show. Use a PNG, JPEG, WebP, GIF or BMP."
         ));
     };
 
@@ -940,7 +940,7 @@ fn create_session(
 
 /// Forgets one conversation and its transcript.
 ///
-/// Kitty's copy only: project files are never touched, and the provider's own
+/// Pantheon's copy only: project files are never touched, and the provider's own
 /// session record stays with the provider.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
@@ -955,7 +955,7 @@ fn delete_session(state: State<'_, AppState>, session_id: String) -> Result<(), 
         .map_err(|e| fail("could not delete that chat", e))
 }
 
-/// Renames a chat. Kitty's title only; neither CLI is asked to rename.
+/// Renames a chat. Pantheon's title only; neither CLI is asked to rename.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
 fn rename_session(
@@ -1097,8 +1097,8 @@ fn start_gate(session_id: &str) -> Arc<Mutex<()>> {
 /// probe launches the CLI, and an npm shim boots Node before it answers.
 const PROBE_REUSE: std::time::Duration = std::time::Duration::from_secs(60);
 
-fn session_probe(harness: HarnessId) -> kitty_core::HarnessStatus {
-    static PROBES: Mutex<Vec<(HarnessId, std::time::Instant, kitty_core::HarnessStatus)>> =
+fn session_probe(harness: HarnessId) -> pantheon_core::HarnessStatus {
+    static PROBES: Mutex<Vec<(HarnessId, std::time::Instant, pantheon_core::HarnessStatus)>> =
         Mutex::new(Vec::new());
     if let Ok(probes) = PROBES.lock() {
         if let Some((_, _, status)) = probes
@@ -1108,7 +1108,7 @@ fn session_probe(harness: HarnessId) -> kitty_core::HarnessStatus {
             return status.clone();
         }
     }
-    let status = kitty_probe::probe_one(harness, &EnvSnapshot::capture());
+    let status = pantheon_probe::probe_one(harness, &EnvSnapshot::capture());
     // Only a found CLI is reused; a missing one is looked for again next time.
     if matches!(status.install, InstallState::Found { .. }) {
         if let Ok(mut probes) = PROBES.lock() {
@@ -1169,7 +1169,7 @@ fn start_session_inner(
 
     // A project with a folder runs in it. One without still needs a working
     // directory -- the CLIs demand one, and anything the agent writes has to
-    // land somewhere -- so it gets an empty folder of its own under kitty's
+    // land somewhere -- so it gets an empty folder of its own under pantheon's
     // data directory. Deliberately not the user's home or the app's install
     // dir: the whole promise of a chat with no codebase is that there is
     // nothing around it to read.
@@ -1179,7 +1179,7 @@ fn start_session_inner(
     };
     let mut spec = SessionSpec::new(harness, path, &cwd);
     spec.approval_mode = parse_approval_mode(&read_approval_mode(&state.store, session_id)?)?;
-    // Explicit recovery asked for fresh provider context; the saved Kitty
+    // Explicit recovery asked for fresh provider context; the saved Pantheon
     // transcript is untouched and nothing is replayed.
     if state
         .store
@@ -1293,7 +1293,7 @@ fn send_turn_inner(
     // the two does not lose what they typed.
     let seq = state
         .store
-        .append_block(session_id, kitty_core::BlockKind::User, trimmed)
+        .append_block(session_id, pantheon_core::BlockKind::User, trimmed)
         .map_err(|e| fail("could not save your message", e))?;
     let shown: Vec<attachments::Attachment> = loaded.iter().map(|l| l.attachment.clone()).collect();
     if let Some(meta) = attachments::block_meta(&shown) {
@@ -1415,7 +1415,7 @@ fn stop_session(state: State<'_, AppState>, session_id: String) -> Result<(), St
     Ok(())
 }
 
-/// Explicitly replace provider context, retaining the saved Kitty transcript.
+/// Explicitly replace provider context, retaining the saved Pantheon transcript.
 /// No user request is replayed and the harness/model choices stay unchanged.
 #[tauri::command]
 async fn restart_session_thread(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
@@ -1453,9 +1453,11 @@ fn search(state: State<'_, AppState>, query: String) -> Result<Vec<Hit>, String>
 
 /// Opens the database under the app's data directory.
 ///
-/// A failure here is not fatal: kitty falls back to an in-memory store so the
+/// A failure here is not fatal: pantheon falls back to an in-memory store so the
 /// user can still talk to an agent, and says so rather than refusing to start.
 fn open_store(app: &tauri::App) -> (Arc<Store>, Option<String>) {
+    // Keep the deployed filename: renaming a live SQLite WAL database can lose
+    // recent writes and would hide existing projects, chats and appearance.
     let path = app.path().app_data_dir().map(|dir| dir.join("kitty.db"));
 
     match path {
@@ -1500,7 +1502,7 @@ pub fn run() {
         // than as base64 in the transcript. A 3MB render becomes 4MB of text
         // in the database, in memory and across IPC if you inline it, and it
         // has to be re-sent every time the row re-renders.
-        .register_uri_scheme_protocol("kitty", |_app, request| {
+        .register_uri_scheme_protocol("pantheon", |_app, request| {
             picture_response(request.uri().path())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1562,7 +1564,7 @@ pub fn run() {
 
             let (store, warning) = open_store(app);
             if let Some(warning) = &warning {
-                eprintln!("kitty: {warning}");
+                eprintln!("pantheon: {warning}");
             }
             attachments::prepare(app.path().app_data_dir().ok());
 
@@ -1576,7 +1578,7 @@ pub fn run() {
             let sink: TitleSink = Arc::new(move |session_id, project_id, title| {
                 use tauri::Emitter;
                 let _ = handle.emit(
-                    "kitty://session-title",
+                    "pantheon://session-title",
                     serde_json::json!({ "sessionId": session_id, "projectId": project_id, "title": title }),
                 );
             });
@@ -1589,7 +1591,7 @@ pub fn run() {
         // There is no window to show this in, and a release build has no
         // console attached either, so the exit code is the real signal. The
         // message is here for `cargo run` and for a crash reporter later.
-        eprintln!("kitty could not start: {error}");
+        eprintln!("Pantheon could not start: {error}");
         std::process::exit(1);
     }
 }
@@ -1600,7 +1602,7 @@ mod tests {
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
 
-    fn state(store: kitty_store::Store, live: HashMap<String, super::Live>) -> super::AppState {
+    fn state(store: pantheon_store::Store, live: HashMap<String, super::Live>) -> super::AppState {
         super::AppState {
             scan: std::sync::Mutex::new(None),
             store: std::sync::Arc::new(store),
@@ -1624,7 +1626,7 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let folder = std::env::temp_dir().join(format!("kitty-{name}-{}", std::process::id()));
+        let folder = std::env::temp_dir().join(format!("pantheon-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).unwrap();
         folder
@@ -1633,7 +1635,7 @@ mod tests {
     #[test]
     fn adding_a_folder_twice_selects_the_existing_project() {
         let folder = scratch("add-twice");
-        let state = state(kitty_store::Store::in_memory().unwrap(), HashMap::new());
+        let state = state(pantheon_store::Store::in_memory().unwrap(), HashMap::new());
 
         let first = super::open_project_inner(&state, folder.to_str().unwrap()).unwrap();
         assert!(first.created);
@@ -1654,7 +1656,7 @@ mod tests {
     fn removing_a_project_keeps_its_folder_and_files() {
         let folder = scratch("remove-project");
         std::fs::write(folder.join("notes.md"), "mine").unwrap();
-        let state = state(kitty_store::Store::in_memory().unwrap(), HashMap::new());
+        let state = state(pantheon_store::Store::in_memory().unwrap(), HashMap::new());
         let opened = super::open_project_inner(&state, folder.to_str().unwrap()).unwrap();
         let chat = state
             .store
@@ -1662,7 +1664,7 @@ mod tests {
             .unwrap();
         state
             .store
-            .append_block(&chat.id, kitty_core::BlockKind::User, "hello")
+            .append_block(&chat.id, pantheon_core::BlockKind::User, "hello")
             .unwrap();
 
         super::remove_project_inner(&state, &opened.project.id).unwrap();
@@ -1680,13 +1682,13 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn archiving_stops_a_chat_and_writing_in_it_restores_it() {
-        use kitty_core::{HarnessId, SessionEvent};
-        use kitty_engine::{Session, SessionSpec};
+        use pantheon_core::{HarnessId, SessionEvent};
+        use pantheon_engine::{Session, SessionSpec};
         use std::time::Duration;
         let folder = scratch("archive");
         let frames = "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"fake\"}\n{\"type\":\"result\",\"stop_reason\":\"end_turn\",\"is_error\":false}\n";
         let binary = recording_claude(&folder, frames);
-        let store = kitty_store::Store::in_memory().unwrap();
+        let store = pantheon_store::Store::in_memory().unwrap();
         let project = store.open_project(&folder).unwrap();
         let row = store.create_session(&project.id, "claude", None).unwrap();
         let spec = SessionSpec::new(HarnessId::Claude, &binary, &folder);
@@ -1731,12 +1733,12 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn an_attached_picture_reaches_the_cli_and_stays_on_the_message() {
-        use kitty_core::{HarnessId, SessionEvent};
-        use kitty_engine::{Session, SessionSpec};
+        use pantheon_core::{HarnessId, SessionEvent};
+        use pantheon_engine::{Session, SessionSpec};
         use std::time::Duration;
         let folder = scratch("attach-send");
         super::attachments::prepare(Some(
-            std::env::temp_dir().join(format!("kitty-attach-root-{}", std::process::id())),
+            std::env::temp_dir().join(format!("pantheon-attach-root-{}", std::process::id())),
         ));
         let root = super::attachments::root().unwrap().to_path_buf();
         std::fs::write(folder.join("cat.png"), b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR").unwrap();
@@ -1745,7 +1747,7 @@ mod tests {
             &folder,
             "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"fake\"}\n{\"type\":\"result\",\"stop_reason\":\"end_turn\",\"is_error\":false}\n",
         );
-        let store = kitty_store::Store::in_memory().unwrap();
+        let store = pantheon_store::Store::in_memory().unwrap();
         let project = store.create_rootless_project("Attach").unwrap();
         let row = store.create_session(&project.id, "claude", None).unwrap();
         let (session, events) =
@@ -1784,7 +1786,7 @@ mod tests {
             .unwrap();
         assert!(block.meta.unwrap().contains("cat.png"));
 
-        // A path outside kitty's attachments folder is refused before sending.
+        // A path outside pantheon's attachments folder is refused before sending.
         let outside = folder.join("cat.png").to_string_lossy().into_owned();
         assert!(super::send_turn_inner(&state, &row.id, "again", &[outside]).is_err());
         let _ = std::fs::remove_dir_all(folder);
@@ -1793,15 +1795,16 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_message_goes_straight_to_the_conversations_cli() {
-        use kitty_core::{HarnessId, SessionEvent};
-        use kitty_engine::{Session, SessionSpec};
+        use pantheon_core::{HarnessId, SessionEvent};
+        use pantheon_engine::{Session, SessionSpec};
         use std::time::Duration;
-        let folder = std::env::temp_dir().join(format!("kitty-direct-send-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("pantheon-direct-send-{}", std::process::id()));
         let binary = recording_claude(
             &folder,
             "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"fake\"}\n{\"type\":\"result\",\"stop_reason\":\"end_turn\",\"is_error\":false}\n",
         );
-        let store = kitty_store::Store::in_memory().unwrap();
+        let store = pantheon_store::Store::in_memory().unwrap();
         let project = store.create_rootless_project("Direct").unwrap();
         let row = store.create_session(&project.id, "claude", None).unwrap();
         let (session, events) =
@@ -1845,16 +1848,16 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_permission_change_applies_to_that_conversations_waiting_request() {
-        use kitty_core::{ApprovalOutcome, HarnessId, SessionEvent};
-        use kitty_engine::{Session, SessionSpec};
+        use pantheon_core::{ApprovalOutcome, HarnessId, SessionEvent};
+        use pantheon_engine::{Session, SessionSpec};
         use std::time::Duration;
         let folder =
-            std::env::temp_dir().join(format!("kitty-permission-test-{}", std::process::id()));
+            std::env::temp_dir().join(format!("pantheon-permission-test-{}", std::process::id()));
         let binary = recording_claude(&folder, concat!(
             "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"fake\"}\n",
             "{\"type\":\"control_request\",\"request_id\":\"edit\",\"request\":{\"subtype\":\"can_use_tool\",\"tool_name\":\"Write\",\"input\":{}}}\n"
         ));
-        let store = kitty_store::Store::in_memory().unwrap();
+        let store = pantheon_store::Store::in_memory().unwrap();
         let project = store.create_rootless_project("Permissions").unwrap();
         let chosen = store.create_session(&project.id, "claude", None).unwrap();
         let other = store.create_session(&project.id, "claude", None).unwrap();
@@ -1894,7 +1897,7 @@ mod tests {
 
     #[test]
     fn permissions_default_to_automatic_and_belong_to_each_conversation() {
-        let store = kitty_store::Store::in_memory().unwrap();
+        let store = pantheon_store::Store::in_memory().unwrap();
         let project = store.create_rootless_project("Permissions").unwrap();
         let first = store.create_session(&project.id, "codex", None).unwrap();
         let second = store.create_session(&project.id, "claude", None).unwrap();
@@ -1917,7 +1920,7 @@ mod tests {
 
     /// A folder standing in for `~/.codex`, with a picture and a secret in it.
     fn sandbox() -> (PathBuf, PathBuf) {
-        let root = std::env::temp_dir().join(format!("kitty-pictures-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("pantheon-pictures-{}", std::process::id()));
         let inside = root.join("generated_images");
         std::fs::create_dir_all(&inside).expect("create");
         std::fs::write(inside.join("burger.png"), b"not really a png").expect("write");

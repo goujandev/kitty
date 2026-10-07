@@ -1,5 +1,5 @@
 [package]
-name = "kitty-catalog"
+name = "pantheon-catalog"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,10 +10,10 @@ description = "Asks each CLI which models it can run."
 workspace = true
 
 [dependencies]
-kitty-core = { workspace = true }
-kitty-harness = { workspace = true }
-kitty-supervisor = { workspace = true }
+pantheon-core = { workspace = true }
+pantheon-harness = { workspace = true }
+pantheon-supervisor = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
-kitty-probe = { workspace = true }
+pantheon-probe = { workspace = true }

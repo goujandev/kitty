@@ -252,7 +252,7 @@ pub async fn dictation_start(
         let root = app
             .path()
             .app_data_dir()
-            .map_err(|_| "Kitty could not open its speech-pack folder.".to_string())?
+            .map_err(|_| "Pantheon could not open its speech-pack folder.".to_string())?
             .join("dictation");
         let bundled = app
             .path()
@@ -335,7 +335,7 @@ pub async fn dictation_finish(
         let root = app
             .path()
             .app_data_dir()
-            .map_err(|_| "Kitty could not open its speech-pack folder.".to_string())?
+            .map_err(|_| "Pantheon could not open its speech-pack folder.".to_string())?
             .join("dictation");
         recognize(&root, audio, &work_ticket)
     })
@@ -473,7 +473,7 @@ fn open_capture(
 ) -> Result<mpsc::Sender<CaptureRequest>, String> {
     let (tx, rx) = mpsc::channel();
     let (started_tx, started_rx) = mpsc::channel();
-    std::thread::Builder::new().name("kitty-dictation-microphone".into()).spawn(move || {
+    std::thread::Builder::new().name("pantheon-dictation-microphone".into()).spawn(move || {
             if ticket.check().is_err() { let _ = started_tx.send(Err(CANCELLED.into())); return; }
             let buffer = Arc::new(Mutex::new(CaptureBuffer::default()));
         let setup = capture_stream(&buffer);
@@ -516,7 +516,7 @@ fn open_capture(
             }
         }
         drop(stream);
-    }).map_err(|_| "Kitty could not open the microphone. Try again.".to_string())?;
+    }).map_err(|_| "Pantheon could not open the microphone. Try again.".to_string())?;
     started_rx
         .recv_timeout(Duration::from_secs(10))
         .map_err(|_| {
@@ -616,7 +616,7 @@ where
 }
 
 fn io_error(_: impl std::fmt::Display) -> String {
-    "Kitty could not save its speech pack. Check free disk space and try again.".into()
+    "Pantheon could not save its speech pack. Check free disk space and try again.".into()
 }
 
 fn verified(directory: &Path, hash: &str, files: &[&str]) -> bool {
@@ -673,7 +673,7 @@ fn prepare_pack(
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(600))
-        .user_agent("Kitty-local-dictation/0.2")
+        .user_agent("Pantheon-local-dictation/0.2")
         .build()
         .map_err(|_| "The speech-pack download could not start.".to_string())?;
     if !verified(&model_dir, MODEL_HASH, MODEL_FILES) {
@@ -963,10 +963,12 @@ fn recognize(root: &Path, audio: Audio, ticket: &Ticket) -> Result<String, Strin
     }
     ort::init_from(root.join(RUNTIME_NAME).join("onnxruntime.dll"))
         .map_err(|_| "The speech runtime could not load. Check that Windows and its Visual C++ runtime are up to date.".to_string())?
-        .with_name("kitty-dictation").with_telemetry(false).commit();
+        .with_name("pantheon-dictation").with_telemetry(false).commit();
     let threads = std::thread::available_parallelism().map_or(2, |count| count.get().min(4));
     let mut model = StreamingModel::load(&root.join(MODEL_NAME), threads, &Quantization::Int8)
-        .map_err(|_| "The speech model could not load. Restart Kitty and try again.".to_string())?;
+        .map_err(|_| {
+            "The speech model could not load. Restart Pantheon and try again.".to_string()
+        })?;
     ticket.check()?;
     let mut parts = Vec::new();
     let mut start = 0;
@@ -1358,17 +1360,17 @@ mod tests {
     }
 
     /// Explicit public-fixture smoke test; never opens the user's microphone.
-    /// Set `KITTY_DICTATION_SMOKE_ROOT` to an ignored fixture/cache directory.
+    /// Set `PANTHEON_DICTATION_SMOKE_ROOT` to an ignored fixture/cache directory.
     #[test]
     #[ignore = "downloads the speech pack and recognizes a public fixture"]
     fn public_fixture_recognition() -> Result<(), String> {
         let root = PathBuf::from(
-            std::env::var_os("KITTY_DICTATION_SMOKE_ROOT")
-                .ok_or("Set KITTY_DICTATION_SMOKE_ROOT")?,
+            std::env::var_os("PANTHEON_DICTATION_SMOKE_ROOT")
+                .ok_or("Set PANTHEON_DICTATION_SMOKE_ROOT")?,
         );
         let shared = Shared::default();
         let ticket = shared.begin("fixture".into())?;
-        let bundled = std::env::var_os("KITTY_DICTATION_BUNDLED_ROOT").map(PathBuf::from);
+        let bundled = std::env::var_os("PANTHEON_DICTATION_BUNDLED_ROOT").map(PathBuf::from);
         prepare_pack(&root, bundled.as_deref(), &ticket, &shared)?;
         let mut reader = hound::WavReader::open(root.join("dots.wav")).map_err(io_error)?;
         let rate = reader.spec().sample_rate;

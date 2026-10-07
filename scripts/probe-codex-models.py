@@ -72,7 +72,7 @@ def main() -> int:
         raise SystemExit(f"timed out waiting for {method}")
 
     request("initialize", {
-        "clientInfo": {"name": "kitty", "title": "kitty", "version": "0.1.0"},
+        "clientInfo": {"name": "pantheon", "title": "Pantheon", "version": "0.1.0"},
         "capabilities": {"experimentalApi": True},
     })
     send({"method": "initialized"})

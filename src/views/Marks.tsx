@@ -70,7 +70,7 @@ function CodexMark({ size }: { size: number }): React.ReactElement {
 /**
  * The person at the keyboard.
  *
- * Deliberately not a photograph or an initial: kitty knows nothing about who
+ * Deliberately not a photograph or an initial: pantheon knows nothing about who
  * is using it, and inventing an identity would be worse than a plain mark.
  */
 export function YouMark({ size = 22 }: { size?: number }): React.ReactElement {

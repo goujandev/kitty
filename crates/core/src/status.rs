@@ -1,4 +1,4 @@
-//! What kitty knows about one CLI right now, and what the user should do
+//! What pantheon knows about one CLI right now, and what the user should do
 //! about it.
 //!
 //! ADR-0004: a harness that is missing, logged out or too old is still listed,
@@ -66,7 +66,7 @@ impl InstallState {
 
 /// Whether the CLI appears to be signed in.
 ///
-/// Derived from the vendor's own credential file, read-only. kitty never
+/// Derived from the vendor's own credential file, read-only. pantheon never
 /// writes these files and never refreshes a token (ADR-0004), so `LoggedIn`
 /// means "the stored token has not expired", not "the provider accepted it".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,7 +87,7 @@ pub enum LoginState {
         expires_at_ms: Option<i64>,
     },
     /// A token is stored but its expiry has passed. The vendor CLI will
-    /// refresh it on next use; kitty will not do that for it.
+    /// refresh it on next use; pantheon will not do that for it.
     Expired { expired_at_ms: i64 },
 }
 
@@ -119,7 +119,7 @@ pub struct HarnessStatus {
     /// Installed, new enough, and signed in.
     pub ready: bool,
     pub hint: Option<Hint>,
-    /// Newest version kitty has been verified against, for an "untested"
+    /// Newest version pantheon has been verified against, for an "untested"
     /// warning when the user is ahead of us (ADR-0002).
     pub verified_version: Version,
     /// True when the install is newer than `verified_version`. A warning, not
@@ -156,7 +156,7 @@ impl HarnessStatus {
                     found, required, ..
                 } => Hint {
                     message: format!(
-                        "{} {found} is older than the {required} kitty needs.",
+                        "{} {found} is older than the {required} Pantheon needs.",
                         d.label
                     ),
                     command: Some(d.install_command.to_owned()),
@@ -164,7 +164,7 @@ impl HarnessStatus {
                 },
                 InstallState::Unidentified { path, .. } => Hint {
                     message: format!(
-                        "Found {path}, but it did not report a version kitty recognises."
+                        "Found {path}, but it did not report a version Pantheon recognises."
                     ),
                     command: None,
                     url: Some(d.docs_url.to_owned()),

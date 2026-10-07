@@ -1,7 +1,7 @@
 # T3 Code interface provenance
 
-Kitty's chrome, composer and sidebar are adapted from T3 Code's appearance, with
-controls changed only where Kitty's functionality differs. This document records
+Pantheon's chrome, composer and sidebar are adapted from T3 Code's appearance, with
+controls changed only where Pantheon's functionality differs. This document records
 the source, the attribution, and what the current direct-chat interface keeps.
 
 ## Reference and attribution
@@ -26,7 +26,8 @@ Copyright 2026 T3 Tools Inc. The complete notice is retained in
 the inspected upstream dependency, replacing the previous handmade stroke icons.
 Its ISC/Feather notices are retained in
 [licenses/Lucide-LICENSE.txt](licenses/Lucide-LICENSE.txt). Both notices are bundled
-in Settings > Open-source credits. Kitty's existing app icon is unchanged.
+in Settings > Open-source credits. Pantheon's app icon is the approved
+monochrome reaching-hands mark, independent of the T3 interface adaptation.
 
 ## Original reference presentation
 
@@ -50,11 +51,11 @@ in Settings > Open-source credits. Kitty's existing app icon is unchanged.
   checkout strip #131313. Sidebar stroke icons #545454; placeholder #666666;
   disabled send opacity .64. Source light/dark theme tokens, system font and
   compact controls extend to menus, settings and the transcript.
-- A one-time `kitty:t3-reference-presentation` preference migration adopts dark
+- A one-time `pantheon:t3-reference-presentation` preference migration adopts dark
   theme, 100% zoom and a 256px sidebar to match the requested reference. Later
   theme, zoom and resize choices remain saved normally.
 
-Kitty-specific adaptations at that stage: the folder strip opens the project chooser and shows
+Pantheon-specific adaptations at that stage: the folder strip opens the project chooser and shows
 the actual path in its tooltip. Working/approval badges are orange; unseen
 successful results are green, failures and stops distinct, and unread results
 clear only when actually viewed. Unsupported Git, attachment, terminal and cloud

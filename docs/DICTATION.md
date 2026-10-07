@@ -1,6 +1,6 @@
 # Local dictation
 
-Kitty v0.2.3 includes dictation using Handy's local recognition stack and Kitty's
+Pantheon v0.2.3 includes dictation using Handy's local recognition stack and Pantheon's
 own composer interaction. The user selected and tested the prototype direction,
 then authorized release with the model/runtime included in the installer.
 
@@ -45,7 +45,7 @@ The 75 ms bins slow scrolling by one third relative to the original 50 ms bins;
 the 80 displayed samples now cover six seconds. Polling/capture stays responsive.
 
 The engine is Handy's `transcribe-rs` 0.3.8 ONNX path with English Moonshine V2
-Small. This native dependency requires Rust 1.88 or later to build Kitty;
+Small. This native dependency requires Rust 1.88 or later to build Pantheon;
 the CI stable toolchain already satisfies it. The build prepares the speech pack,
 including the
 model (104,842,676-byte source archive) and Microsoft's CPU ONNX Runtime
@@ -55,7 +55,7 @@ resources and licensing notices. Generated files are ignored and never committed
 `tauri.conf.json` maps `resources/dictation/` to the installed `dictation/` folder.
 The installer also includes four unmodified, signed Microsoft Visual C++ x64
 runtime DLLs from Visual Studio's release redistributables. These are installed
-beside Kitty.exe for dependency resolution; no separate VC++ installation is
+beside Pantheon.exe for dependency resolution; no separate VC++ installation is
 needed. The preparation script checks their Microsoft signatures and x64 PE
 architecture. Their redistribution notice is included in the app directory.
 On first use, Rust stages this pack into app-data using cancellable copies and
@@ -84,7 +84,7 @@ Only the native Windows build provides real dictation.
 Source reference: [Handy v0.9.8](https://github.com/cjpais/Handy/tree/v0.9.8),
 including its model catalog and Moonshine engine configuration. Retain the
 Handy MIT notice and speech dependency/model licences in `docs/licenses` and
-the application's Open-source credits. Kitty uses its own in-composer controls
+the application's Open-source credits. Pantheon uses its own in-composer controls
 instead of Handy's global hotkeys, floating overlay, clipboard and paste path.
 
 ## Validation
@@ -93,7 +93,7 @@ The production prepare/download/extract/recognize path passed on Windows using
 the public `dots.wav` fixture from transcribe-rs, without capturing the user's
 microphone. The 35.33-second recording took 12.10 seconds including cold model
 loading in the unoptimized test build. Its isolated process peaked at 372.5 MiB
-(about 391 MB) working set; that is not total Kitty RAM or a guaranteed bound.
+(about 391 MB) working set; that is not total Pantheon RAM or a guaranteed bound.
 The verified extracted model is 164,714,425 bytes and runtime is 14,503,061 bytes,
 179,217,486 bytes combined. Recognition sessions are dropped before returning
 the result; the ONNX library/environment remain loaded in the process.

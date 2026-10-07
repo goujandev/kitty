@@ -65,7 +65,7 @@ export function ChatView({ detailsOpen, onCloseDetails, onSwitchProject }: { det
         {chat.error && (
           <p className="banner banner--error" role="alert">
             {chat.error}
-            {chat.activeId && !chat.busy && <button type="button" disabled={chat.loading} title="Keeps saved Kitty history, starts fresh model context, and does not resend requests" onClick={() => void restartAgentContext()}>Start fresh agent context</button>}
+            {chat.activeId && !chat.busy && <button type="button" disabled={chat.loading} title="Keeps saved Pantheon history, starts fresh model context, and does not resend requests" onClick={() => void restartAgentContext()}>Start fresh agent context</button>}
           </p>
         )}
 
@@ -93,7 +93,7 @@ export function ChatView({ detailsOpen, onCloseDetails, onSwitchProject }: { det
         {/* Pinned to the bottom once there is a transcript above it; centred
             in the empty window, where there is nothing to sit under. */}
         <div className="dock">
-          {blank && !background && <h1 className="draft-headline">What should we build in <span>{chat.project?.name ?? "Kitty"}</span>?</h1>}
+          {blank && !background && <h1 className="draft-headline">What should we build in <span>{chat.project?.name ?? "Pantheon"}</span>?</h1>}
           {archived && <p className="archived-note" role="status">
             <span>This chat is archived. Sending a message restores it.</span>
             <button type="button" className="ws-link" onClick={() => void archiveChat(archived.projectId, archived.id, false)}>Restore</button>

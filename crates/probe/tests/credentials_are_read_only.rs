@@ -1,7 +1,7 @@
 //! Enforces prototype-1 acceptance criterion 3: *no credential file is ever
 //! opened for writing.*
 //!
-//! ADR-0004 forbids kitty from writing vendor credential stores, refreshing
+//! ADR-0004 forbids pantheon from writing vendor credential stores, refreshing
 //! tokens, or impersonating a vendor client. `MonoCode` does all three for its
 //! usage meter, and rotating a refresh token underneath a running `claude`
 //! process can log the user out of their real tool.
@@ -13,8 +13,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use kitty_probe::credentials::{credentials_path, login_state};
-use kitty_probe::EnvSnapshot;
+use pantheon_probe::credentials::{credentials_path, login_state};
+use pantheon_probe::EnvSnapshot;
 
 /// Write-capable APIs that must never appear in the credentials module.
 ///
@@ -96,13 +96,13 @@ fn reading_a_credential_file_does_not_disturb_it() {
 
     // Point at our fixture, then probe it several times.
     assert_eq!(
-        credentials_path(&kitty_core::CLAUDE, &env),
+        credentials_path(&pantheon_core::CLAUDE, &env),
         Some(file.clone())
     );
     for _ in 0..5 {
-        let state = login_state(&kitty_core::CLAUDE, &env);
+        let state = login_state(&pantheon_core::CLAUDE, &env);
         assert!(
-            matches!(state, kitty_core::LoginState::LoggedIn { .. }),
+            matches!(state, pantheon_core::LoginState::LoggedIn { .. }),
             "fixture should read as signed in, got {state:?}"
         );
     }
@@ -135,8 +135,8 @@ fn a_missing_credential_file_is_not_created() {
         )]),
     );
 
-    let state = login_state(&kitty_core::CODEX, &env);
-    assert!(matches!(state, kitty_core::LoginState::LoggedOut));
+    let state = login_state(&pantheon_core::CODEX, &env);
+    assert!(matches!(state, pantheon_core::LoginState::LoggedOut));
 
     assert!(
         !config.join("auth.json").exists(),

@@ -5,8 +5,11 @@ import ts from 'typescript';
 
 // The store module touches React and localStorage only when used; the rules
 // under test are plain functions, so a stub React is enough to import it.
+const preferences = ts.transpileModule(readFileSync(new URL('../src/stores/localPreferences.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const preferencesUrl = 'data:text/javascript;base64,' + Buffer.from(preferences).toString('base64');
 const source = readFileSync(new URL('../src/stores/tabStore.ts', import.meta.url), 'utf8')
-  .replace('import { useSyncExternalStore } from "react";', 'const useSyncExternalStore = () => undefined;');
+  .replace('import { useSyncExternalStore } from "react";', 'const useSyncExternalStore = () => undefined;')
+  .replace('"./localPreferences"', JSON.stringify(preferencesUrl));
 const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const { DRAFT, close, cycle, prune, reveal } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
 

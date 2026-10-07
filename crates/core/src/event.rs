@@ -183,7 +183,7 @@ pub struct Usage {
 /// One subscription rate-limit window, as the vendor reports it.
 ///
 /// Both CLIs hand this over themselves: Claude Code emits `rate_limit_event`
-/// in its stream, Codex answers `account/rateLimits/read`. kitty never reads a
+/// in its stream, Codex answers `account/rateLimits/read`. pantheon never reads a
 /// credential file for this (ADR-0004).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

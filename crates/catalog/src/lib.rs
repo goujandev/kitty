@@ -22,8 +22,8 @@
 use std::path::Path;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use kitty_core::{HarnessId, ModelCatalog, ModelInfo};
-use kitty_supervisor::{spawn, ChildEvent, Frame, SpawnSpec};
+use pantheon_core::{HarnessId, ModelCatalog, ModelInfo};
+use pantheon_supervisor::{spawn, ChildEvent, Frame, SpawnSpec};
 use serde_json::{json, Value};
 
 /// How long a probe may take.
@@ -135,7 +135,7 @@ enum Reply {
 
 /// Claude answers a `list_models` control request on its normal stream.
 fn probe_claude(binary: &Path, cwd: &Path) -> Result<Vec<ModelInfo>, CatalogError> {
-    let args = kitty_harness::claude::launch_args()
+    let args = pantheon_harness::claude::launch_args()
         .into_iter()
         // The permission tool is for real turns; a listing never uses one, and
         // leaving it on would make the CLI wait for a prompt handler.
@@ -144,7 +144,7 @@ fn probe_claude(binary: &Path, cwd: &Path) -> Result<Vec<ModelInfo>, CatalogErro
 
     let ask = json!({
         "type": "control_request",
-        "request_id": "kitty-models",
+        "request_id": "pantheon-models",
         "request": { "subtype": "list_models" },
     })
     .to_string();
@@ -158,7 +158,7 @@ fn probe_claude(binary: &Path, cwd: &Path) -> Result<Vec<ModelInfo>, CatalogErro
             return Reply::Continue;
         }
         let response = msg.get("response").unwrap_or(&Value::Null);
-        if response.get("request_id").and_then(Value::as_str) != Some("kitty-models") {
+        if response.get("request_id").and_then(Value::as_str) != Some("pantheon-models") {
             return Reply::Continue;
         }
         if let Some(models) = response
@@ -252,13 +252,13 @@ fn claude_model(raw: &Value) -> Option<ModelInfo> {
 ///
 /// Read from the CLI rather than from a table in this repo, for the same
 /// reason the catalog itself is (`MODEL-CATALOG.md`): a model released this
-/// morning has to name itself correctly without kitty shipping anything.
+/// morning has to name itself correctly without pantheon shipping anything.
 ///
 /// An earlier version of this read the version off the id instead, which was
 /// wrong in a way worth recording. `claude-fable-5-1[1m]` resolves to plain
 /// `claude-fable-5-1` -- the bracket in the id is not a promise about context
 /// -- so parsing it produced a label claiming a 1M window the model does not
-/// have. The CLI knows; kitty should not be guessing.
+/// have. The CLI knows; pantheon should not be guessing.
 ///
 /// Newer Claude Code versions moved the full name into `displayName`
 /// ("Opus 5.5", "Fable 5.1") and left `description` as the sales line alone,
@@ -293,7 +293,7 @@ fn probe_codex(binary: &Path, cwd: &Path) -> Result<Vec<ModelInfo>, CatalogError
         "id": 1,
         "method": "initialize",
         "params": {
-            "clientInfo": { "name": "kitty", "title": "kitty", "version": env!("CARGO_PKG_VERSION") },
+            "clientInfo": { "name": "pantheon", "title": "Pantheon", "version": env!("CARGO_PKG_VERSION") },
             "capabilities": { "experimentalApi": true },
         },
     })
@@ -305,7 +305,7 @@ fn probe_codex(binary: &Path, cwd: &Path) -> Result<Vec<ModelInfo>, CatalogError
     converse(
         binary,
         cwd,
-        kitty_harness::codex::launch_args(),
+        pantheon_harness::codex::launch_args(),
         vec![init],
         |line| {
             let Ok(msg) = serde_json::from_str::<Value>(line) else {
@@ -501,7 +501,7 @@ mod tests {
         }
     }
 
-    /// A model kitty has never heard of still has to arrive intact.
+    /// A model pantheon has never heard of still has to arrive intact.
     #[test]
     fn a_claude_label_falls_back_when_the_description_has_no_name() {
         let bare = json!({ "value": "some-new-thing" });

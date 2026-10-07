@@ -11,7 +11,7 @@ env:
 
 jobs:
   check:
-    # Windows only, on purpose. kitty targets Windows and nothing else
+    # Windows only, on purpose. pantheon targets Windows and nothing else
     # (ADR-0001), so there is no matrix to keep green.
     runs-on: windows-latest
 
@@ -38,6 +38,9 @@ jobs:
 
       - name: Update flow and release configuration
         run: npm run test:updates
+
+      - name: Branding and upgrade compatibility
+        run: npm run test:branding
 
       - name: Dictation interactions
         run: npm run test:dictation

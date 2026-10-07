@@ -19,12 +19,12 @@
 //! rate_limit_event                  five_hour / seven_day utilisation
 //! ```
 //!
-//! Claude hands us `rate_limit_event` unprompted, which is why kitty never has
+//! Claude hands us `rate_limit_event` unprompted, which is why pantheon never has
 //! to touch a credential file to show usage (ADR-0004).
 
 use std::collections::HashMap;
 
-use kitty_core::{
+use pantheon_core::{
     ApprovalKind, ApprovalOutcome, ErrorKind, RateLimitWindow, SessionEvent, StopReason,
     ToolStatus, Usage,
 };
@@ -150,7 +150,7 @@ impl Codec for ClaudeCodec {
         Step::send(
             json!({
                 "type": "control_request",
-                "request_id": format!("kitty-{}", self.next_control),
+                "request_id": format!("pantheon-{}", self.next_control),
                 "request": { "subtype": "interrupt" },
             })
             .to_string(),
@@ -526,7 +526,7 @@ pub fn classify(message: &str) -> ErrorKind {
 mod tests {
     use super::{launch_args, ClaudeCodec};
     use crate::{Codec, StartContext, Step};
-    use kitty_core::{SessionEvent, StopReason};
+    use pantheon_core::{SessionEvent, StopReason};
     use serde_json::json;
 
     fn ctx() -> StartContext {

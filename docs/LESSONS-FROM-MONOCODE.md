@@ -1,6 +1,6 @@
 # Lessons from MonoCode
 
-kitty follows MonoCode's core idea: a desktop UI that drives already-installed,
+pantheon follows MonoCode's core idea: a desktop UI that drives already-installed,
 already-logged-in coding-agent CLIs. This file records what a close read of
 `hardbeat920/monocode` @ `478bc65` (v0.1.46, 2026-09-14) actually established,
 so the design decisions in `adr/` have something concrete underneath them.
@@ -70,7 +70,7 @@ lifecycle, `message.delta`, `reasoning.delta`, `tool.started`/`tool.updated`,
 This works. Outside `src/lib/harness/`, branching on harness id is essentially
 cosmetic: icons, one hidden setting for OpenCode, and which usage footer to
 show. Seven wildly different wire protocols genuinely do collapse into one
-vocabulary. kitty should copy this idea and spend real effort getting the
+vocabulary. pantheon should copy this idea and spend real effort getting the
 vocabulary right, because everything above it depends on the union being
 complete enough that the UI never needs to know who produced an event.
 
@@ -95,7 +95,7 @@ re-implements:
 
 `piFamily.ts` is the exception: Pi and omp share one core through a `PiFlavor`
 descriptor. That proves the abstraction is possible and simply was not
-extracted. **This is the single biggest thing kitty should do differently.**
+extracted. **This is the single biggest thing pantheon should do differently.**
 
 Adding a harness to MonoCode touches about nineteen places: six new files, a
 `HarnessId` union, `HARNESSES`, `HARNESS_LABEL`, `HARNESS_TITLE`, an
@@ -126,7 +126,7 @@ paragraphs, both in streamed replies.
 
 The root cause is architectural, not a typo: whether a harness appends or
 resends is a fixed, knowable property of each protocol, and the code infers it
-per chunk instead. kitty makes each adapter declare its delta semantics and
+per chunk instead. pantheon makes each adapter declare its delta semantics and
 never guesses. A related detail MonoCode gets right and we should keep:
 `streamTextDelta` deliberately preserves whitespace-only chunks, with the
 comment "Whitespace is real content, not a missing field".
@@ -144,7 +144,7 @@ Worth copying:
   that startup scripts cannot spawn descendants outside the job
   (`vendor/portable-pty/UPSTREAM.md`). This is the correct fix and it is not
   obvious. Process-tree cleanup on Windows is a real cost centre, and since
-  kitty targets only Windows it should be the mechanism rather than a special
+  pantheon targets only Windows it should be the mechanism rather than a special
   case bolted onto a signal-based design.
 - GUI processes do not inherit a shell's `PATH`, so MonoCode resolves one at
   startup and caches it (`harness.rs:1958`).
@@ -187,7 +187,7 @@ The layer is coupled to undocumented, unversioned CLI surfaces. It shows up as:
   instruction string, to steer the agent through its tool-result channel
   (`claude.ts:846`)
 
-Only ACP pins a protocol version. kitty cannot avoid this coupling, but it can
+Only ACP pins a protocol version. pantheon cannot avoid this coupling, but it can
 put every version gate and quirk in one declarative table per harness rather
 than scattering it through control flow.
 

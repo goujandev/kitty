@@ -1,16 +1,16 @@
 [package]
-name = "kitty-harness"
+name = "pantheon-harness"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Per-CLI codecs: wire frames in, kitty session events out."
+description = "Per-CLI codecs: wire frames in, pantheon session events out."
 
 [lints]
 workspace = true
 
 [dependencies]
-kitty-core = { workspace = true }
+pantheon-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 base64 = "0.22"

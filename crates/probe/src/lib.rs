@@ -15,7 +15,7 @@ pub mod exec;
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use kitty_core::{HarnessId, HarnessStatus, InstallState, Version};
+use pantheon_core::{HarnessId, HarnessStatus, InstallState, Version};
 
 pub use env::EnvSnapshot;
 
@@ -50,7 +50,7 @@ pub fn probe_all(env: &EnvSnapshot) -> Vec<HarnessStatus> {
                             path: String::new(),
                             message: "the probe panicked".to_owned(),
                         },
-                        kitty_core::LoginState::Unknown {
+                        pantheon_core::LoginState::Unknown {
                             reason: "probe did not complete".to_owned(),
                         },
                         now_ms(),
@@ -72,7 +72,7 @@ pub fn probe_one(id: HarnessId, env: &EnvSnapshot) -> HarnessStatus {
     let login = if install.is_usable() {
         credentials::login_state(descriptor, env)
     } else {
-        kitty_core::LoginState::Unknown {
+        pantheon_core::LoginState::Unknown {
             reason: "not checked".to_owned(),
         }
     };
@@ -156,7 +156,7 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::{first_line, probe_all, resolve_install, EnvSnapshot};
-    use kitty_core::{HarnessId, InstallState};
+    use pantheon_core::{HarnessId, InstallState};
     use std::collections::HashMap;
 
     #[test]

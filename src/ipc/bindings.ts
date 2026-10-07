@@ -31,7 +31,7 @@ export type InstallState =
 /**
  * Whether the CLI appears to be signed in.
  *
- * `loggedIn` means the stored token has not expired. kitty never refreshes or
+ * `loggedIn` means the stored token has not expired. pantheon never refreshes or
  * validates it; only the vendor CLI can do that (ADR-0004).
  */
 export type LoginState =
@@ -223,13 +223,13 @@ export interface SessionRow {
   title: string | null;
   createdAt: number;
   updatedAt: number;
-  /** When Kitty archived the chat; null while it is in the list. */
+  /** When Pantheon archived the chat; null while it is in the list. */
   archivedAt: number | null;
 }
 
 /** One model, as its CLI describes it. */
 export interface ModelInfo {
-  /** What kitty passes back to the CLI to select this model. */
+  /** What pantheon passes back to the CLI to select this model. */
   id: string;
   displayName: string;
   description: string | null;

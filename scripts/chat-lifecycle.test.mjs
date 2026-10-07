@@ -29,7 +29,7 @@ async function setup() {
   const noop = () => {};
   const environment = {
     Date: class extends Date { static now() { return now; } },
-    localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
+    localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     document: { visibilityState: 'visible', hasFocus: () => true, addEventListener: noop, removeEventListener: noop },
     window: { addEventListener: noop, removeEventListener: noop },
   };
@@ -45,6 +45,7 @@ async function setup() {
   }
   const store = load('../src/stores/chatStore.ts', {
     react: { useSyncExternalStore: noop },
+    './localPreferences': load('../src/stores/localPreferences.ts'),
     '../ipc/bindings': load('../src/ipc/bindings.ts'),
     '../ipc/commands': ipc,
     './projectActivity': load('../src/stores/projectActivity.ts'),

@@ -7,7 +7,7 @@ import { ChatView } from "./views/ChatView";
 import { SearchDialog } from "./views/SearchDialog";
 import { SettingsDialog, type Section } from "./views/Settings";
 import { WindowControls } from "./views/WindowControls";
-import { Icon } from "./views/Icon";
+import { Icon, PantheonMark } from "./views/Icon";
 import { ProjectChooser } from "./views/ProjectChooser";
 import { TabBar, cycleTabs } from "./views/TabBar";
 import { DRAFT, tabsFor } from "./stores/tabStore";
@@ -113,7 +113,7 @@ export function App(): React.ReactElement {
         {sidebarCollapsed && <button type="button" className="icon-button workspace-tabs__sidebar" aria-label="Show sidebar" title="Show sidebar (Ctrl+B)" aria-keyshortcuts="Control+B" onClick={toggleSidebar}><Icon name="panel" size={16} /></button>}
         {chat.project?.root
           ? <TabBar onNewChat={() => startChat()} renameActive={renamingTitle} onRenameDone={() => setRenamingTitle(false)} />
-          : <strong className="workspace-title workspace-title--static">Kitty</strong>}
+          : <strong className="workspace-title workspace-title--static"><PantheonMark size={24} />Pantheon</strong>}
         <span className="workspace-tabs__drag" data-tauri-drag-region />
         {chat.project?.root && <>
           <button type="button" className={`icon-button${detailsOpen ? " is-active" : ""}`} aria-label="Chat details" aria-expanded={detailsOpen} title="Chat details" onClick={() => setDetailsOpen(value => !value)}><Icon name="panelRight" size={16} /></button>

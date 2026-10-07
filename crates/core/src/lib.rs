@@ -1,4 +1,4 @@
-//! kitty domain types.
+//! pantheon domain types.
 //!
 //! No I/O, no Tauri, no filesystem, no network. Everything here is a plain
 //! value that can be serialized, compared and tested in isolation. Layers

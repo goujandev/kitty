@@ -5,7 +5,7 @@ import { isTauri } from "@tauri-apps/api/core";
  * Minimise, maximise and close, drawn by the app.
  *
  * The window has no decorations (`tauri.conf.json`), so a native title bar
- * never appears above kitty's own chrome. The strip these sit in carries
+ * never appears above pantheon's own chrome. The strip these sit in carries
  * `data-tauri-drag-region`, which is what makes the window movable; Tauri only
  * treats an event as a drag when the element under the pointer is the region
  * itself, so these buttons still receive their clicks.

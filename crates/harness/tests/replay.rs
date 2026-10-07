@@ -15,8 +15,8 @@
 
 use std::path::PathBuf;
 
-use kitty_core::{HarnessId, SessionEvent};
-use kitty_harness::{codec_for, delta_mode, StartContext};
+use pantheon_core::{HarnessId, SessionEvent};
+use pantheon_harness::{codec_for, delta_mode, StartContext};
 use serde_json::Value;
 
 struct Replay {
@@ -58,7 +58,7 @@ fn replay(id: HarnessId, harness: &str) -> Replay {
     // The recorded session already answered our handshake, so we start the
     // codec and then feed it exactly what the CLI said, in order.
     let _ = codec.start(&StartContext {
-        cwd: r"C:\GitHub\kitty".into(),
+        cwd: r"C:\GitHub\pantheon".into(),
         resume: None,
         model: None,
         effort: None,
@@ -265,7 +265,7 @@ fn replay_tools(id: HarnessId, harness: &str) -> Vec<SessionEvent> {
 
     let mut codec = codec_for(id);
     let _ = codec.start(&StartContext {
-        cwd: r"C:\GitHub\kitty".into(),
+        cwd: r"C:\GitHub\pantheon".into(),
         resume: None,
         model: None,
         effort: None,

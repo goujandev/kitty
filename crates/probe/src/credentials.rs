@@ -1,6 +1,6 @@
 //! Reading vendor login state. **Read-only, always.**
 //!
-//! ADR-0004: kitty never writes another tool's credential store, never
+//! ADR-0004: pantheon never writes another tool's credential store, never
 //! performs a refresh-token grant, and never sends a vendor user agent or
 //! client id. Rotating a token in a file a running `claude` process also owns
 //! can log the user out of their real tool.
@@ -18,7 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use kitty_core::{HarnessDescriptor, HarnessId, LoginState};
+use pantheon_core::{HarnessDescriptor, HarnessId, LoginState};
 use serde_json::Value;
 
 use crate::env::EnvSnapshot;
@@ -91,7 +91,7 @@ fn claude_login(json: &Value) -> LoginState {
 ///   "tokens": { "id_token": "<jwt>", "access_token": "<jwt>" } }
 /// ```
 fn codex_login(json: &Value) -> LoginState {
-    // An API-key login is still a working CLI, even though kitty itself is
+    // An API-key login is still a working CLI, even though pantheon itself is
     // subscription-only. Report it honestly rather than calling it logged out.
     if non_empty_str(json.get("OPENAI_API_KEY")).is_some() {
         return LoginState::LoggedIn {
@@ -167,7 +167,7 @@ fn now_ms() -> i64 {
 mod tests {
     use super::{claude_login, codex_login, credentials_path, now_ms};
     use crate::env::EnvSnapshot;
-    use kitty_core::{LoginState, CLAUDE, CODEX};
+    use pantheon_core::{LoginState, CLAUDE, CODEX};
     use std::collections::HashMap;
     use std::path::PathBuf;
 

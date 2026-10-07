@@ -35,7 +35,7 @@
 }
 .ws-sidebar--collapsed { width: 52px !important; }
 .ws-sidebar__head { display: flex; align-items: center; flex: none; gap: 2px; height: 40px; padding: 4px 8px; }
-.ws-brand { color: var(--text); font-size: var(--font-md); font-weight: 600; line-height: 20px; }
+.ws-brand { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-size: var(--font-md); font-weight: 600; line-height: 20px; }
 .ws-sidebar .ws-icon-button { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
 .ws-sidebar .ws-icon-button:hover { background: var(--row-hover); color: var(--text); }
 .ws-sidebar--collapsed .ws-sidebar__head { justify-content: center; padding: 4px 10px; }
@@ -194,7 +194,7 @@
 /* ------------------------------------------------ title and archive note */
 .workspace-title { min-width: 0; overflow: hidden; padding: 4px 8px; margin-left: -8px; border: 0; border-radius: 6px; background: transparent; color: var(--text); cursor: text; font: inherit; font-size: var(--font-md); font-weight: 600; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
 button.workspace-title:hover { background: var(--row-hover); }
-.workspace-title--static { margin-left: 0; padding-inline: 0; cursor: default; }
+.workspace-title--static { display: inline-flex; align-items: center; gap: 8px; margin-left: 0; padding-inline: 0; cursor: default; }
 .workspace-title__badge { margin-left: 8px; padding: 1px 6px; border-radius: 4px; background: var(--secondary); color: var(--muted); font-size: var(--font-xs); font-weight: 500; line-height: 16px; vertical-align: 1px; }
 .workspace-title__rename { flex: 0 1 360px; }
 .workspace-breadcrumb { gap: 8px; }

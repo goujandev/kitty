@@ -1,22 +1,22 @@
-//! `cargo run -p kitty-catalog --example models`
+//! `cargo run -p pantheon-catalog --example models`
 //!
 //! Asks each installed CLI what it can run, and prints it. The headless
 //! version of the model picker.
 
 fn main() -> std::process::ExitCode {
-    let env = kitty_probe::EnvSnapshot::capture();
+    let env = pantheon_probe::EnvSnapshot::capture();
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
     let mut any = false;
 
-    for harness in kitty_core::HarnessId::ALL {
-        let status = kitty_probe::probe_one(harness, &env);
-        let kitty_core::InstallState::Found { path, version } = &status.install else {
+    for harness in pantheon_core::HarnessId::ALL {
+        let status = pantheon_probe::probe_one(harness, &env);
+        let pantheon_core::InstallState::Found { path, version } = &status.install else {
             eprintln!("{}: not available", status.label);
             continue;
         };
 
         let started = std::time::Instant::now();
-        match kitty_catalog::probe(
+        match pantheon_catalog::probe(
             harness,
             std::path::Path::new(path),
             &cwd,

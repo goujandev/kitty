@@ -1,3 +1,4 @@
+import { readPreference } from "../stores/localPreferences";
 /**
  * A pretend host, so the real interface runs in an ordinary browser.
  *
@@ -31,7 +32,7 @@ function previewWaveform(): number[] {
 const minutes = (n: number) => now - n * 60_000;
 
 const projects: Row[] = [
-  { id: "kitty", name: "kitty", root: "C:\\GitHub\\kitty", createdAt: minutes(9000), lastOpenedAt: minutes(5), sortOrder: 3 },
+  { id: "pantheon", name: "Pantheon", root: "C:\\GitHub\\pantheon", createdAt: minutes(9000), lastOpenedAt: minutes(5), sortOrder: 3 },
   { id: "spyder", name: "spyder", root: "C:\\GitHub\\spyder", createdAt: minutes(8000), lastOpenedAt: minutes(60), sortOrder: 2 },
   { id: "site", name: "personal-website", root: "C:\\GitHub\\personal-website", createdAt: minutes(7000), lastOpenedAt: minutes(600), sortOrder: 1 },
 ];
@@ -44,13 +45,13 @@ const session = (projectId: string, title: string | null, harness: "codex" | "cl
 });
 
 const sessions: Row[] = [
-  session("kitty", "Redesign the sidebar for projects and chats", "claude", 12),
-  session("kitty", "Why does the transcript jump when streaming?", "codex", 95),
-  session("kitty", "Add a Nord theme", "claude", 1400),
-  session("kitty", "Old experiment with tabs", "codex", 9000, minutes(4000)),
+  session("pantheon", "Redesign the sidebar for projects and chats", "claude", 12),
+  session("pantheon", "Why does the transcript jump when streaming?", "codex", 95),
+  session("pantheon", "Add a Nord theme", "claude", 1400),
+  session("pantheon", "Old experiment with tabs", "codex", 9000, minutes(4000)),
   session("spyder", "Add Pinterest and Reddit downloads", "codex", 50),
   session("spyder", "Fix the progress bar on large files", "claude", 2000),
-  session("site", "Plush Kitty section on the homepage", "claude", 3000),
+  session("site", "Pantheon download section on the homepage", "claude", 3000),
 ];
 
 const blocks: Record<string, Row[]> = {};
@@ -80,13 +81,13 @@ const scan = { harnesses: [harness("claude", "Claude Code", "Anthropic"), harnes
 
 // ------------------------------------------------------------------ wallpaper
 
-const WALLPAPER_KEY = "kitty.preview.wallpaper";
+const WALLPAPER_KEY = "pantheon.preview.wallpaper";
 /** A copy of the real wallpaper, if one was put here (gitignored). */
 const LOCAL_WALLPAPER = "/preview-local/background.jpg";
 
 async function wallpaper(): Promise<string | null> {
   try {
-    const saved = localStorage.getItem(WALLPAPER_KEY);
+    const saved = readPreference("preview.wallpaper");
     if (saved === "none") return null;
     if (saved) return saved;
   } catch { /* Storage may be unavailable. */ }
@@ -165,8 +166,8 @@ const listeners = new Map<string, number[]>();
 let nextCallback = 1;
 
 function emit(sessionId: string, events: Row[]): void {
-  for (const id of listeners.get("kitty://transcript") ?? []) {
-    callbacks.get(id)?.({ event: "kitty://transcript", id, payload: { sessionId, events } });
+  for (const id of listeners.get("pantheon://transcript") ?? []) {
+    callbacks.get(id)?.({ event: "pantheon://transcript", id, payload: { sessionId, events } });
   }
 }
 
@@ -337,7 +338,7 @@ async function command(cmd: string, args: Record<string, unknown>): Promise<unkn
         const short = String(args.text).replace(/^(hey|hi|hello|please|can you|could you|we need to|i want to)[,\s]+/i, "").split(/\s+/).filter(word => !/^(the|a|an|to|we|need|entire|please)$/i.test(word)).slice(0, 3).join(" ");
         setTimeout(() => {
           row.title = short.charAt(0).toUpperCase() + short.slice(1);
-          for (const handler of listeners.get("kitty://session-title") ?? []) callbacks.get(handler)?.({ event: "kitty://session-title", id: handler, payload: { sessionId: id, projectId: row.projectId, title: row.title } });
+          for (const handler of listeners.get("pantheon://session-title") ?? []) callbacks.get(handler)?.({ event: "pantheon://session-title", id: handler, payload: { sessionId: id, projectId: row.projectId, title: row.title } });
         }, 1500);
       }
       row.archivedAt = null;

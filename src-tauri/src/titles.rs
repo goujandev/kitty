@@ -15,8 +15,8 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use kitty_core::HarnessId;
-use kitty_supervisor::{ChildEvent, Frame, SpawnSpec};
+use pantheon_core::HarnessId;
+use pantheon_supervisor::{ChildEvent, Frame, SpawnSpec};
 
 /// How long a title may take before the first-line one is simply kept.
 const DEADLINE: Duration = Duration::from_secs(60);
@@ -92,7 +92,7 @@ pub fn clean(output: &str) -> Option<String> {
 /// A folder of its own for the call, so the agent reads nothing it was not
 /// given.
 pub fn scratch() -> std::io::Result<PathBuf> {
-    let dir = std::env::temp_dir().join("kitty-titles");
+    let dir = std::env::temp_dir().join("pantheon-titles");
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -100,7 +100,7 @@ pub fn scratch() -> std::io::Result<PathBuf> {
 /// Runs the call and returns the title, or `None` on any failure.
 pub fn generate(harness: HarnessId, binary: &Path, message: &str) -> Option<String> {
     let scratch = scratch().ok()?;
-    let mut child = kitty_supervisor::spawn(&command(harness, binary, &scratch)).ok()?;
+    let mut child = pantheon_supervisor::spawn(&command(harness, binary, &scratch)).ok()?;
     let events = child.take_events()?;
     child.write_line(prompt(message));
     child.close_stdin();
@@ -133,7 +133,7 @@ pub fn generate(harness: HarnessId, binary: &Path, message: &str) -> Option<Stri
 #[cfg(test)]
 mod tests {
     use super::{clean, command, prompt};
-    use kitty_core::HarnessId;
+    use pantheon_core::HarnessId;
     use std::path::Path;
 
     #[test]

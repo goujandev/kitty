@@ -84,7 +84,7 @@ if (problems.length > 0) {
   console.error("src/ipc/bindings.ts is out of date with the Rust wire types:\n");
   for (const problem of problems) console.error(`  - ${problem}`);
   console.error(
-    "\nRust regenerates the contract with:\n  UPDATE_CONTRACT=1 cargo test -p kitty-core\n" +
+    "\nRust regenerates the contract with:\n  UPDATE_CONTRACT=1 cargo test -p pantheon-core\n" +
       "Then update src/ipc/bindings.ts to match.\n",
   );
   process.exit(1);

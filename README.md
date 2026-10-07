@@ -1,26 +1,30 @@
-# Kitty
+# Pantheon
 
 A Windows desktop workspace for the coding agents you already use.
+
+Pantheon is your personal hub for AI coding agents. Its monochrome reaching-hands
+logo is used by the app, Windows icons and installer. Choose your own wallpaper
+and theme; the brand does not replace your appearance settings.
 
 ## Download and install
 
 1. Open the [latest release](https://github.com/goujandev/kitty/releases/latest).
 2. Download the Windows x64 file ending in `-setup.exe`.
-3. Run the installer, then open **Kitty** from the Start menu.
+3. Run the installer, then open **Pantheon** from the Start menu.
 
 The installer includes the app and an uninstaller, and installs for your Windows user account. It can install Microsoft Edge WebView2 if needed. You do not need Node.js, Rust, or Visual Studio to run the installed app.
 
-Kitty uses your locally installed **Codex** or **Claude Code** CLI for agent conversations. Install and sign in to at least one of those agents, then open a project folder in Kitty. The agent settings show which agents are available.
+Pantheon uses your locally installed **Codex** or **Claude Code** CLI for agent conversations. Install and sign in to at least one of those agents, then open a project folder in Pantheon. The agent settings show which agents are available.
 
 ## Updates
 
-Kitty checks for updates at launch. Open **Settings > Updates** to check manually, download a new version, and restart to install it. Earlier versions need one manual installation of v0.1.1 or newer; later releases update through the app.
+Pantheon checks for updates at launch. Open **Settings > Updates** to check manually, download a new version, and restart to install it. Earlier versions need one manual installation of v0.1.1 or newer; later releases update through the app.
 
 ## Workspace
 
-Kitty is a project-based chat for coding agents you already pay for. It talks to
+Pantheon is a project-based chat for coding agents you already pay for. It talks to
 your locally installed, signed-in **Codex** or **Claude Code** CLI, so your existing
-ChatGPT or Claude subscription is what does the work. Kitty never copies, changes
+ChatGPT or Claude subscription is what does the work. Pantheon never copies, changes
 or refreshes either tool's sign-in; the CLI stays in charge of authentication,
 sessions and models.
 
@@ -39,14 +43,14 @@ After a chat's first message, its own agent (Claude Code or Codex) is asked once
 Projects in the sidebar expand to show their chats. Each project and chat has a
 "⋯" menu, also opened by right-click or Shift+F10:
 - **Rename** (F2, or double-click). A chat can also be renamed by clicking its
-  title in the title bar. A project's name is only its label in Kitty; the folder
+  title in the title bar. A project's name is only its label in Pantheon; the folder
   on disk is never renamed or moved.
 - **Archive** (chats) hides a chat under the project's **Archived** list and keeps
   its history. **Restore**, or sending a message, brings it back.
-- **Delete** (chats) permanently removes Kitty's copy of the conversation after a
+- **Delete** (chats) permanently removes Pantheon's copy of the conversation after a
   confirmation. Project files are not touched, and Codex or Claude Code keep
   their own session records.
-- **Remove from Kitty** (projects) deletes Kitty's record and stored chats for
+- **Remove from Pantheon** (projects) deletes Pantheon's record and stored chats for
   the project after a confirmation. The folder and its files always stay on disk.
 
 - Streaming replies, permission requests, Stop, errors and a clear Working /
@@ -55,7 +59,7 @@ Projects in the sidebar expand to show their chats. Each project and chat has a
 - Attachments: the paperclip beside the chat settings attaches pictures (PNG,
   JPEG, GIF, WebP, up to 5 MB each) and plain-text documents (.txt, .md, .csv,
   .json, code and similar, up to 256 KB each), up to ten per message. Pictures
-  preview in the box before sending and show in the chat afterwards. Kitty keeps
+  preview in the box before sending and show in the chat afterwards. Pantheon keeps
   its own copy of each file in its data folder (`attachments`), so moving the
   original later changes nothing. Claude receives pictures inline and Codex reads
   them from that copy; text documents are included in the message, labelled
@@ -83,16 +87,16 @@ Projects in the sidebar expand to show their chats. Each project and chat has a
   and title bar take one solid colour from the picture, its own dark warmed
   with a little of its accent.
 
-Kitty is a local agent workspace. Pull requests, cloud automations, and integrated editor or terminal services are not included.
+Pantheon is a local agent workspace. Pull requests, cloud automations, and integrated editor or terminal services are not included.
 
-If Codex's saved conversation is missing, Kitty automatically starts fresh agent
+If Codex's saved conversation is missing, Pantheon automatically starts fresh agent
 context and quietly keeps your visible chat history. It never replays old requests.
 Other startup failures remain visible; **Start fresh agent context** is still
 available for manual recovery when appropriate.
 
 ## Local dictation
 
-Press the microphone beside Send to record. Kitty shows activity and keeps the
+Press the microphone beside Send to record. Pantheon shows activity and keeps the
 recognized words hidden until you finish. The microphone becomes a Stop button;
 press Stop to put the
 finished text into the message box for editing, or press Send while recording
@@ -101,7 +105,7 @@ recording and keeps your original draft. Changing chats also cancels dictation.
 
 The Windows installer includes the speech model and its required runtimes. First use prepares
 these installed files locally; dictation requires no separate download, account
-or API key. Kitty uses Handy's English Moonshine Small recognition stack, with
+or API key. Pantheon uses Handy's English Moonshine Small recognition stack, with
 no LLM cleanup, and supports English recordings up to two minutes.
 The microphone closes after recording and the model unloads after recognition.
 See [implementation and validation](docs/DICTATION.md) for limits and attribution.
@@ -144,6 +148,7 @@ npm run test:updates
 npm run test:activity
 npm run test:workspace
 npm run test:dictation
+npm run test:branding
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace

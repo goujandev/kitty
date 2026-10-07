@@ -31,7 +31,7 @@ export function HarnessCard({ status }: { status: HarnessStatus }): React.ReactE
 
       {status.newerThanVerified && (
         <p className="note">
-          Newer than the {formatVersion(status.verifiedVersion)} kitty has been tested
+          Newer than the {formatVersion(status.verifiedVersion)} Pantheon has been tested
           against. It should work; tell us if it does not.
         </p>
       )}

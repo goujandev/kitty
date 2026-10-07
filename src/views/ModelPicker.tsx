@@ -22,7 +22,7 @@ import { Popover } from "./Popover";
  * menu holding both had to re-explain itself every time the model changed.
  *
  * The list comes from the CLIs, never from a table in this repo, so a model
- * released this morning appears without kitty shipping anything
+ * released this morning appears without pantheon shipping anything
  * (`MODEL-CATALOG.md`). The custom field exists for the same reason from the
  * other direction: if the probe has not caught up, you can still type an id
  * and it is passed through untouched.
@@ -44,7 +44,7 @@ export function ModelTools({
 }: {
   /** The vendor in force, from the open session or the pending draft. */
   harness: HarnessId | null;
-  /** Every harness kitty found, for labels and for whether it can run. */
+  /** Every harness pantheon found, for labels and for whether it can run. */
   harnesses: HarnessStatus[];
   catalogs: Partial<Record<HarnessId, ModelCatalog>>;
   /** What the user asked for, keyed to the catalog. Null means the default. */
@@ -149,7 +149,7 @@ export function ModelTools({
  *
  * The id is what gets sent; this is only ever shown. Anything unrecognised is
  * capitalised and passed through, so a level added tomorrow still reads
- * properly without kitty shipping an update for it.
+ * properly without pantheon shipping an update for it.
  */
 export function effortLabel(level: string | null): string {
   if (!level) return "Effort";

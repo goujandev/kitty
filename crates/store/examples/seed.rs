@@ -1,7 +1,7 @@
-//! Seeds a project and a session into kitty's database.
+//! Seeds a project and a session into pantheon's database.
 //!
 //! ```text
-//! cargo run -p kitty-store --example seed -- <db-path> <project-dir> [harness]
+//! cargo run -p pantheon-store --example seed -- <db-path> <project-dir> [harness]
 //! ```
 //!
 //! Exists so the app can be driven end to end without going through a native
@@ -15,7 +15,7 @@ fn main() -> std::process::ExitCode {
     };
     let harness = args.next().unwrap_or_else(|| "claude".to_owned());
 
-    let store = match kitty_store::Store::open(&db) {
+    let store = match pantheon_store::Store::open(&db) {
         Ok(store) => store,
         Err(e) => {
             eprintln!("could not open {db}: {e}");

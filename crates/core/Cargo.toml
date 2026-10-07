@@ -1,10 +1,10 @@
 [package]
-name = "kitty-core"
+name = "pantheon-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "kitty domain types. No I/O."
+description = "pantheon domain types. No I/O."
 
 [lints]
 workspace = true

@@ -1,3 +1,4 @@
+import { readPreference } from "./localPreferences";
 /**
  * Which chats are open as tabs, per project.
  *
@@ -65,13 +66,13 @@ export function cycle(tabs: Tabs, step: number): string | null {
 
 // ------------------------------------------------------------------ store
 
-const KEY = "kitty.tabs";
+const KEY = "pantheon.tabs";
 let byProject: Record<string, Tabs> = read();
 const listeners = new Set<() => void>();
 
 function read(): Record<string, Tabs> {
   try {
-    const saved: unknown = JSON.parse(localStorage.getItem(KEY) ?? "{}");
+    const saved: unknown = JSON.parse(readPreference("tabs") ?? "{}");
     return saved && typeof saved === "object" ? saved as Record<string, Tabs> : {};
   } catch { return {}; }
 }

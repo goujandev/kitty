@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-use kitty_core::{HarnessId, SessionEvent, StopReason, ToolStatus};
-use kitty_engine::{Session, SessionSpec};
+use pantheon_core::{HarnessId, SessionEvent, StopReason, ToolStatus};
+use pantheon_engine::{Session, SessionSpec};
 
 /// Builds a fake CLI: a batch file that prints canned frames and ignores its
 /// arguments, so the engine's real launch flags do not disturb it.
@@ -147,7 +147,7 @@ fn fake_codex(dir: &Path) -> PathBuf {
         ],
     );
     // PowerShell rather than batch: `set /p` on a pipe can swallow two frames
-    // written together, and Kitty sends `initialized` and `thread/start` so.
+    // written together, and Pantheon sends `initialized` and `thread/start` so.
     std::fs::write(
         dir.join("codex.ps1"),
         concat!(
@@ -213,7 +213,7 @@ fn a_direct_codex_turn_carries_only_the_users_message() {
 
 #[test]
 fn automatic_permission_modes_only_prompt_for_uncovered_actions() {
-    use kitty_engine::ApprovalMode;
+    use pantheon_engine::ApprovalMode;
     for (mode, tool, should_ask) in [
         (ApprovalMode::Auto, "Write", false),
         (ApprovalMode::Auto, "Bash", false),
@@ -239,7 +239,7 @@ fn automatic_permission_modes_only_prompt_for_uncovered_actions() {
                     assert!(session.respond(&id, true));
                 }
                 SessionEvent::ApprovalResolved { outcome, .. } => {
-                    assert_eq!(outcome, kitty_core::ApprovalOutcome::Allowed);
+                    assert_eq!(outcome, pantheon_core::ApprovalOutcome::Allowed);
                     resolved = true;
                     break;
                 }
@@ -253,7 +253,7 @@ fn automatic_permission_modes_only_prompt_for_uncovered_actions() {
 
 #[test]
 fn changing_permission_mode_settles_pending_actions_it_covers() {
-    use kitty_engine::ApprovalMode;
+    use pantheon_engine::ApprovalMode;
     let dir = tempfile::tempdir().expect("tempdir");
     let edit = r#"{"type":"control_request","request_id":"edit","request":{"subtype":"can_use_tool","tool_name":"Write","input":{}}}"#;
     let command = r#"{"type":"control_request","request_id":"command","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{}}}"#;
@@ -281,7 +281,7 @@ fn changing_permission_mode_settles_pending_actions_it_covers() {
             .expect("edit resolution")
         {
             assert_eq!(id, "edit");
-            assert_eq!(outcome, kitty_core::ApprovalOutcome::Allowed);
+            assert_eq!(outcome, pantheon_core::ApprovalOutcome::Allowed);
             break;
         }
     }
@@ -292,7 +292,7 @@ fn changing_permission_mode_settles_pending_actions_it_covers() {
             .expect("command resolution")
         {
             assert_eq!(id, "command");
-            assert_eq!(outcome, kitty_core::ApprovalOutcome::Allowed);
+            assert_eq!(outcome, pantheon_core::ApprovalOutcome::Allowed);
             break;
         }
     }
@@ -456,7 +456,7 @@ fn a_permission_request_can_be_answered_and_the_turn_continues() {
             }
             Ok(SessionEvent::ApprovalResolved { id, outcome }) => {
                 assert_eq!(Some(&id), asked.as_ref());
-                assert_eq!(outcome, kitty_core::ApprovalOutcome::Allowed);
+                assert_eq!(outcome, pantheon_core::ApprovalOutcome::Allowed);
                 resolved = true;
             }
             Ok(_) => {}
@@ -496,7 +496,7 @@ fn cancelling_denies_anything_waiting_on_the_user() {
 
     assert_eq!(
         outcome,
-        Some(kitty_core::ApprovalOutcome::Denied),
+        Some(pantheon_core::ApprovalOutcome::Denied),
         "cancelling must deny an outstanding request, not abandon it"
     );
 }

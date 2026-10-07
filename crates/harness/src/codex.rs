@@ -27,7 +27,7 @@
 
 use std::collections::HashMap;
 
-use kitty_core::{
+use pantheon_core::{
     ApprovalKind, ApprovalOutcome, ErrorKind, RateLimitWindow, SessionEvent, StopReason,
     ToolStatus, Usage,
 };
@@ -147,7 +147,7 @@ impl Codec for CodexCodec {
         let line = self.request(
             "initialize",
             &json!({
-                "clientInfo": { "name": "kitty", "title": "kitty", "version": env!("CARGO_PKG_VERSION") },
+                "clientInfo": { "name": "pantheon", "title": "Pantheon", "version": env!("CARGO_PKG_VERSION") },
                 "capabilities": { "experimentalApi": true },
             }),
             Pending::Initialize,
@@ -261,7 +261,7 @@ impl CodexCodec {
                 .unwrap_or("the app-server rejected a request")
                 .to_owned();
             // A missing saved context is recoverable once during the handshake.
-            // Preserve only current input; never load/replay Kitty's transcript.
+            // Preserve only current input; never load/replay Pantheon's transcript.
             if what == Pending::ThreadStart
                 && self.resume.as_ref().is_some_and(|thread| {
                     message.trim() == format!("no rollout found for thread id {thread}")
@@ -757,7 +757,7 @@ pub fn classify(message: &str) -> ErrorKind {
 mod tests {
     use super::{launch_args, CodexCodec};
     use crate::{Codec, StartContext, Step};
-    use kitty_core::{SessionEvent, StopReason};
+    use pantheon_core::{SessionEvent, StopReason};
     use serde_json::{json, Value};
 
     fn ctx() -> StartContext {
@@ -1049,7 +1049,7 @@ mod tests {
         assert_eq!(text, "Hello, lovely human.");
     }
 
-    /// What made Kitty say "Worked for" while it was still working: a
+    /// What made Pantheon say "Worked for" while it was still working: a
     /// sub-agent finishing its own turn was taken for the conversation's.
     #[test]
     fn a_sub_agents_turn_and_text_are_not_the_conversations() {
@@ -1349,7 +1349,7 @@ mod tests {
         assert!(matches!(
             step.events.first(),
             Some(SessionEvent::Error { error_kind, .. })
-                if *error_kind == kitty_core::ErrorKind::Auth
+                if *error_kind == pantheon_core::ErrorKind::Auth
         ));
     }
 

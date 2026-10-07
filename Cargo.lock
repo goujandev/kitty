@@ -2293,112 +2293,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kitty"
-version = "0.2.4"
-dependencies = [
- "base64 0.22.1",
- "cpal",
- "flate2",
- "hound",
- "kitty-catalog",
- "kitty-core",
- "kitty-engine",
- "kitty-probe",
- "kitty-store",
- "kitty-supervisor",
- "minisign-verify",
- "ort",
- "reqwest 0.12.28",
- "rubato",
- "serde",
- "serde_json",
- "sha2",
- "tar",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-updater",
- "tempfile",
- "tokio",
- "transcribe-rs",
- "zip 2.4.2",
-]
-
-[[package]]
-name = "kitty-catalog"
-version = "0.2.4"
-dependencies = [
- "kitty-core",
- "kitty-harness",
- "kitty-probe",
- "kitty-supervisor",
- "serde_json",
-]
-
-[[package]]
-name = "kitty-core"
-version = "0.2.4"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "kitty-engine"
-version = "0.2.4"
-dependencies = [
- "kitty-core",
- "kitty-harness",
- "kitty-probe",
- "kitty-supervisor",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "kitty-harness"
-version = "0.2.4"
-dependencies = [
- "base64 0.22.1",
- "kitty-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "kitty-probe"
-version = "0.2.4"
-dependencies = [
- "base64 0.22.1",
- "kitty-core",
- "serde",
- "serde_json",
- "tempfile",
- "winreg",
-]
-
-[[package]]
-name = "kitty-store"
-version = "0.2.4"
-dependencies = [
- "kitty-core",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "kitty-supervisor"
-version = "0.2.4"
-dependencies = [
- "kitty-core",
- "tempfile",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "libappindicator"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3142,6 +3036,112 @@ dependencies = [
  "gobject-sys",
  "libc",
  "system-deps",
+]
+
+[[package]]
+name = "pantheon"
+version = "0.2.5"
+dependencies = [
+ "base64 0.22.1",
+ "cpal",
+ "flate2",
+ "hound",
+ "minisign-verify",
+ "ort",
+ "pantheon-catalog",
+ "pantheon-core",
+ "pantheon-engine",
+ "pantheon-probe",
+ "pantheon-store",
+ "pantheon-supervisor",
+ "reqwest 0.12.28",
+ "rubato",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-updater",
+ "tempfile",
+ "tokio",
+ "transcribe-rs",
+ "zip 2.4.2",
+]
+
+[[package]]
+name = "pantheon-catalog"
+version = "0.2.5"
+dependencies = [
+ "pantheon-core",
+ "pantheon-harness",
+ "pantheon-probe",
+ "pantheon-supervisor",
+ "serde_json",
+]
+
+[[package]]
+name = "pantheon-core"
+version = "0.2.5"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "pantheon-engine"
+version = "0.2.5"
+dependencies = [
+ "pantheon-core",
+ "pantheon-harness",
+ "pantheon-probe",
+ "pantheon-supervisor",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "pantheon-harness"
+version = "0.2.5"
+dependencies = [
+ "base64 0.22.1",
+ "pantheon-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "pantheon-probe"
+version = "0.2.5"
+dependencies = [
+ "base64 0.22.1",
+ "pantheon-core",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "winreg",
+]
+
+[[package]]
+name = "pantheon-store"
+version = "0.2.5"
+dependencies = [
+ "pantheon-core",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "pantheon-supervisor"
+version = "0.2.5"
+dependencies = [
+ "pantheon-core",
+ "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

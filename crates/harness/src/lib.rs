@@ -1,5 +1,5 @@
-//! Codecs: one per CLI, each turning that vendor's wire frames into kitty's
-//! event vocabulary and kitty's actions into that vendor's frames.
+//! Codecs: one per CLI, each turning that vendor's wire frames into pantheon's
+//! event vocabulary and pantheon's actions into that vendor's frames.
 //!
 //! A codec owns decode state and nothing else. No process handle, no timer, no
 //! turn queue, no approval queue, no cancellation flag. Those belong to the
@@ -15,7 +15,7 @@
 pub mod claude;
 pub mod codex;
 
-use kitty_core::{HarnessId, SessionEvent};
+use pantheon_core::{HarnessId, SessionEvent};
 
 /// A picture the user attached, already checked and read by the host.
 ///
@@ -137,7 +137,7 @@ pub trait Codec: Send {
     /// Answer a permission request the codec raised.
     ///
     /// `id` is whatever the codec put on
-    /// [`SessionEvent::ApprovalRequested`](kitty_core::SessionEvent). Mapping
+    /// [`SessionEvent::ApprovalRequested`](pantheon_core::SessionEvent). Mapping
     /// it back to the vendor's own identifier is the codec's job, because the
     /// engine deliberately knows nothing about either protocol.
     fn respond_approval(&mut self, id: &str, allow: bool) -> Step;
@@ -211,9 +211,9 @@ pub fn codec_for(id: HarnessId) -> Box<dyn Codec> {
 /// Both append. Confirmed by recording: Claude sent `"Hello there"` then
 /// `", friend"`, Codex sent `"Hello" "," " lovely" " human" "."`.
 #[must_use]
-pub const fn delta_mode(id: HarnessId) -> kitty_core::DeltaMode {
+pub const fn delta_mode(id: HarnessId) -> pantheon_core::DeltaMode {
     match id {
-        HarnessId::Claude | HarnessId::Codex => kitty_core::DeltaMode::Append,
+        HarnessId::Claude | HarnessId::Codex => pantheon_core::DeltaMode::Append,
     }
 }
 
@@ -229,7 +229,7 @@ pub(crate) fn u64_field(value: &serde_json::Value, key: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::{codec_for, delta_mode, launch_args, Step};
-    use kitty_core::{DeltaMode, HarnessId, SessionEvent};
+    use pantheon_core::{DeltaMode, HarnessId, SessionEvent};
 
     #[test]
     fn every_harness_has_launch_args_and_a_codec() {
@@ -266,7 +266,7 @@ mod summary_tests {
         assert_eq!(
             summarize(
                 "Write",
-                &json!({"file_path": r"C:\GitHub\kitty\src\main.rs"})
+                &json!({"file_path": r"C:\GitHub\pantheon\src\main.rs"})
             ),
             "Write src/main.rs"
         );

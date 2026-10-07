@@ -1,6 +1,6 @@
 # Design philosophy
 
-kitty should feel like a finished product, not a tool with a UI bolted on. The
+pantheon should feel like a finished product, not a tool with a UI bolted on. The
 bar is the one Apple sets: you should be able to hand it to someone who has
 never seen it, watch them use it, and have nothing to explain.
 
@@ -17,7 +17,7 @@ understood, remove it. A row of buttons that do nothing, a status bar that
 repeats what is already visible, a tooltip that restates the label — these are
 not neutral. They cost attention, and attention is the whole budget.
 
-This is why kitty's composer has no `+` button and no settings gear, even
+This is why pantheon's composer has no `+` button and no settings gear, even
 though the app it was modelled on has both. There is nothing behind them yet.
 A button that does nothing is a broken promise the user only discovers by
 pressing it.
@@ -84,7 +84,7 @@ opens, whether Escape closes it, what happens on a 300-pixel-wide window,
 whether the close button reaches the very corner of the screen when maximised.
 Nobody praises these. Everybody feels them.
 
-**The window is ours.** kitty draws its own title bar because an OS frame above
+**The window is ours.** pantheon draws its own title bar because an OS frame above
 a carefully made app looks like a web page in a picture frame. Doing that means
 we owe the user everything the frame gave them: drag, double-click to maximise,
 edge resize, and Aero Snap all still work.

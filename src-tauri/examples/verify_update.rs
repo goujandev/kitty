@@ -1,4 +1,4 @@
-//! Release check: verify the installer using the exact key embedded in Kitty.
+//! Release check: verify the installer using the exact key embedded in Pantheon.
 use base64::{engine::general_purpose::STANDARD, Engine};
 use minisign_verify::{PublicKey, Signature};
 use std::{error::Error, fs};

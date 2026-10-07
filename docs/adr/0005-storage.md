@@ -4,7 +4,7 @@ Status: proposed
 
 ## Context
 
-kitty persists projects, sessions, transcripts, settings and model catalog
+pantheon persists projects, sessions, transcripts, settings and model catalog
 caches. Transcripts grow to megabytes, sessions number in the hundreds per
 project, and search across them should be instant.
 

@@ -2,7 +2,7 @@
 //!
 //! `PATH` first, because that is what the user's own shell would run. Then the
 //! vendor-specific directories from the manifest, which cover the case where
-//! `PATH` is stale because the CLI was installed after kitty started.
+//! `PATH` is stale because the CLI was installed after pantheon started.
 //!
 //! Extension order matters on Windows. npm installs three files side by side:
 //! `claude` (a shell script, unusable here), `claude.cmd`, and `claude.ps1`
@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use kitty_core::HarnessDescriptor;
+use pantheon_core::HarnessDescriptor;
 
 use crate::env::EnvSnapshot;
 
@@ -71,7 +71,7 @@ pub fn candidates(descriptor: &HarnessDescriptor, env: &EnvSnapshot) -> Vec<Cand
 mod tests {
     use super::{candidates, Origin};
     use crate::env::EnvSnapshot;
-    use kitty_core::{HarnessId, CLAUDE};
+    use pantheon_core::{HarnessId, CLAUDE};
     use std::collections::HashMap;
 
     fn touch(dir: &std::path::Path, name: &str) {

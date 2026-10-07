@@ -1,23 +1,23 @@
 //! Files the user attaches to a message: pictures and text documents.
 //!
-//! A picked file is checked and copied into kitty's own folder straight away.
+//! A picked file is checked and copied into pantheon's own folder straight away.
 //! The copy is what the preview shows, what the transcript links to and what
 //! the agent reads, so moving or editing the original afterwards changes
 //! nothing about a message already written. Nothing outside that folder is
 //! ever sent: the frontend names attachments by path, and a path from the
 //! window is checked here again rather than trusted.
 //!
-//! Pictures go to each agent the way it wants them (see `kitty_harness`).
+//! Pictures go to each agent the way it wants them (see `pantheon_harness`).
 //! Text documents are folded into the message itself, labelled with their
 //! names, because every model reads that the same way and neither CLI has to
-//! be given access to kitty's folder.
+//! be given access to pantheon's folder.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use kitty_engine::{ImageInput, TurnInput};
+use pantheon_engine::{ImageInput, TurnInput};
 use serde::Serialize;
 
 /// Pictures both vendors accept. BMP is not one of them.
@@ -64,7 +64,7 @@ pub enum AttachmentKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Attachment {
-    /// Kitty's own copy. The window names the attachment by this.
+    /// Pantheon's own copy. The window names the attachment by this.
     pub path: String,
     /// The original file name, for display.
     pub name: String,
@@ -155,7 +155,7 @@ pub fn load(path: &Path, name: String) -> Result<Loaded, String> {
     let bytes = std::fs::read(path).map_err(|_| format!("{name} could not be read"))?;
     if readable_text(&bytes).is_none() {
         return Err(format!(
-            "{name} is not a picture or a text document. Kitty can send PNG, JPEG, GIF and WebP pictures, and plain-text files such as .txt, .md, .csv, .json or code."
+            "{name} is not a picture or a text document. Pantheon can send PNG, JPEG, GIF and WebP pictures, and plain-text files such as .txt, .md, .csv, .json or code."
         ));
     }
     Ok(Loaded {
@@ -196,7 +196,7 @@ pub fn import(root: &Path, source: &Path) -> Result<Attachment, String> {
 /// Reads an attachment the window named, refusing anything outside `root`.
 ///
 /// `canonicalize` is what makes this a check rather than a formality: without
-/// it `attachments\..\kitty.db` passes a prefix test.
+/// it `attachments\..\pantheon.db` passes a prefix test.
 pub fn resolve(root: &Path, path: &str) -> Result<Loaded, String> {
     let refused =
         || "an attachment is no longer available; remove it and attach it again".to_owned();
@@ -273,7 +273,8 @@ mod tests {
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR";
 
     fn folder(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
-        let base = std::env::temp_dir().join(format!("kitty-attach-{name}-{}", std::process::id()));
+        let base =
+            std::env::temp_dir().join(format!("pantheon-attach-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let root = base.join("attachments");
         std::fs::create_dir_all(&root).expect("root");
@@ -318,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn only_kittys_own_copies_can_be_sent() {
+    fn only_pantheons_own_copies_can_be_sent() {
         let (base, root) = folder("resolve");
         std::fs::write(base.join("secret.txt"), "private").expect("secret");
         std::fs::write(base.join("ok.txt"), "fine").expect("ok");

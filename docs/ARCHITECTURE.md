@@ -1,6 +1,11 @@
-# kitty — Architecture
+# Pantheon — Architecture
 
-kitty is a desktop application that drives coding-agent CLIs you have already
+The implemented application is branded Pantheon across the frontend, Rust
+packages, internal event/image schemes and Windows packaging. Existing persisted
+identity/database and historical migration matching remain compatible; see
+[release and rebrand continuity](releases.md#branding-and-upgrade-continuity).
+
+pantheon is a desktop application that drives coding-agent CLIs you have already
 installed and logged into. It does not call model APIs and it does not sell
 tokens. You open a project, pick an agent, and talk to it.
 
@@ -20,15 +25,15 @@ IPC contract for current behavior. Older planning sections below are historical.
 
 ---
 
-## 1. What kitty is
+## 1. What pantheon is
 
-An agent is a vendor CLI: `claude`, `codex`, and later others. kitty spawns it
+An agent is a vendor CLI: `claude`, `codex`, and later others. pantheon spawns it
 as a child process, speaks its wire protocol over stdio, normalizes what comes
 back into one event vocabulary, and renders it.
 
 This choice is the whole product. It means:
 
-- **Auth is not our problem.** If `claude` and `codex` are logged in, kitty
+- **Auth is not our problem.** If `claude` and `codex` are logged in, pantheon
   works. No API keys, no OAuth flow, no token storage.
 - **Every model is available for free.** We ask each CLI what it can run. The
   answer is authoritative for that subscription, and it is current without us
@@ -173,7 +178,7 @@ append. That heuristic is why two consecutive identical deltas silently
 collapse, and it is the architectural cause behind upstream reports of dropped
 spaces between words and lost blank lines between paragraphs.
 
-kitty puts `DeltaMode` in the manifest and applies the matching rule with no
+pantheon puts `DeltaMode` in the manifest and applies the matching rule with no
 inspection of content. Whitespace-only chunks are content and are never
 dropped. When a completed message arrives after tokens, the engine emits only
 the suffix, computed by length, not by similarity.
@@ -216,7 +221,7 @@ is solved once, here.
 **Idle parking.** After a turn settles, the child stays warm for a few minutes,
 then is stopped while its resume handle is retained. The next prompt respawns
 and resumes. MonoCode's version of this has an open bug where parking kills a
-session that still had background work running, so parking in kitty is gated on
+session that still had background work running, so parking in pantheon is gated on
 the engine believing nothing is in flight, and the CLI's own background-task
 signals feed that belief.
 
@@ -302,10 +307,10 @@ The part that is genuinely hard, especially on Windows.
   and `CREATE_NEW_PROCESS_GROUP`.
 - **Orphan reaping at launch**: children carry a parent-pid marker in their
   environment, and we sweep for markers whose parent is gone. This covers the
-  case where kitty was killed hard enough that job cleanup did not run.
+  case where pantheon was killed hard enough that job cleanup did not run.
 - **`PATH` is resolved at launch and refreshable on demand.** Windows hands a
   GUI process the `PATH` that existed when it started, so installing a CLI
-  while kitty is running leaves it invisible. We re-read the user and machine
+  while pantheon is running leaves it invisible. We re-read the user and machine
   environment on demand rather than making the user restart the app, and CLIs
   installed through npm land in `%APPDATA%\npm`, which is a candidate path in
   its own right.
@@ -360,7 +365,7 @@ every command in the app queues.
 
 ## 9. Credentials
 
-kitty never writes another tool's credential store and never impersonates
+pantheon never writes another tool's credential store and never impersonates
 another client.
 
 Concretely: no writing to `%USERPROFILE%\.claude\.credentials.json` or
@@ -372,7 +377,7 @@ a corruption and surprise-logout hazard, and upstream has an open pull request
 titled "stop rotating Claude's OAuth token".
 
 Usage and rate-limit data is obtained by asking the CLI, which is what MonoCode
-already does for Codex via its app-server. Where no such command exists, kitty
+already does for Codex via its app-server. Where no such command exists, pantheon
 reads the credential file read-only to display status, and if the token is
 expired it says so and tells you which command refreshes it. Details in
 ADR-0004.
@@ -392,7 +397,7 @@ written during render; the sidebar takes 76 props; the pane props are a
 on every pane below it. Any session update re-renders the whole monolith, and
 that is the hot path during streaming.
 
-kitty's rules:
+pantheon's rules:
 
 - Session state lives in the Rust store and is mirrored into one frontend store
   updated by batched engine events. Components subscribe to selectors.
@@ -429,7 +434,7 @@ either the CLIs or we do.
   turn needs to see the stream. MonoCode has no such view and its changelog
   shows diagnostics being deliberately hidden from the transcript.
 - Structured logs to disk, tokens never logged.
-- `kitty doctor`: resolved paths, which CLIs were found and at what version,
+- `pantheon doctor`: resolved paths, which CLIs were found and at what version,
   which are logged in, catalog cache state.
 
 ---
@@ -459,7 +464,7 @@ Crates marked *planned* do not exist yet; they arrive with the slice that needs
 them (`PROTOTYPE-1.md`).
 
 ```
-kitty/
+pantheon/
   Cargo.toml                   workspace
   crates/
     core/                      domain types, manifests, SessionEvent

@@ -9,22 +9,22 @@ export function UpdateSettings(): React.ReactElement {
   const busy = ["checking", "downloading", "installing"].includes(state.phase);
   const percent = state.total ? Math.min(100, Math.round(state.downloaded / state.total * 100)) : null;
   const status = {
-    idle: "Check for a newer published release of Kitty.",
+    idle: "Check for a newer published release of Pantheon.",
     checking: "Checking for updates...",
-    current: "You're running the latest version of Kitty.",
-    available: "Kitty " + state.version + " is available.",
-    downloading: "Downloading Kitty " + state.version + "...",
-    ready: "Kitty " + state.version + " is downloaded and ready to install.",
-    installing: "Starting the installer. Kitty will close and restart after installation.",
-    installed: "Installation has started. If Kitty does not restart automatically, reopen it from the Start menu.",
+    current: "You're running the latest version of Pantheon.",
+    available: "Pantheon " + state.version + " is available.",
+    downloading: "Downloading Pantheon " + state.version + "...",
+    ready: "Pantheon " + state.version + " is downloaded and ready to install.",
+    installing: "Starting the installer. Pantheon will close and restart after installation.",
+    installed: "Installation has started. If Pantheon does not restart automatically, reopen it from the Start menu.",
     unavailable: "Updates are available in the installed Windows app.",
   }[state.phase];
   return <div className="settings"><div className="settings__inner">
     <h2 className="settings__heading">App updates</h2>
     <div className="settings__row">
       <div className="settings__label">
-        <span className="settings__name">Kitty{state.currentVersion ? " " + state.currentVersion : ""}</span>
-        <span className="settings__blurb">Kitty checks GitHub Releases when it starts. You choose when to download and install an update.</span>
+        <span className="settings__name">Pantheon{state.currentVersion ? " " + state.currentVersion : ""}</span>
+        <span className="settings__blurb">Pantheon checks GitHub Releases when it starts. You choose when to download and install an update.</span>
       </div>
       <div className="settings__control"><button type="button" className="button"
         disabled={busy || ["unavailable", "ready", "installed"].includes(state.phase)}
@@ -41,7 +41,7 @@ export function UpdateSettings(): React.ReactElement {
     </div>}
     {state.phase === "available" && <button type="button" className="button" onClick={() => void updates.download()}>Download update</button>}
     {state.phase === "ready" && <div className="update-restart">
-      <p className="settings__blurb">Restart to install this update. Kitty will close, and the installer will reopen it when finished. Save anything you need from unsent drafts first.</p>
+      <p className="settings__blurb">Restart to install this update. Pantheon will close, and the installer will reopen it when finished. Save anything you need from unsent drafts first.</p>
       {running && <p className="settings__blurb">Wait for running conversations to finish before restarting.</p>}
       <button type="button" className="button" disabled={running} onClick={() => void updates.install(Object.keys(chat.running).length > 0)}>Restart and install</button>
     </div>}

@@ -1,3 +1,4 @@
+import { readPreference } from "./localPreferences";
 /**
  * What the window looks like, beyond the stylesheet.
  *
@@ -112,7 +113,7 @@ export async function loadAppearance(): Promise<void> {
   try {
     // Adopt the user's requested reference presentation once. Subsequent
     // appearance and zoom changes remain ordinary saved preferences.
-    if (localStorage.getItem("kitty:t3-reference-presentation") !== "true") {
+    if (readPreference("t3-reference-presentation", ":") !== "true") {
       widths = {
         projects: 256,
         chats: rails.chats === 248 ? 260 : rails.chats,
@@ -122,7 +123,7 @@ export async function loadAppearance(): Promise<void> {
       await ipc.setRailWidths(widths);
       await ipc.setTheme(nextTheme);
       await ipc.setZoom(nextZoom);
-      localStorage.setItem("kitty:t3-reference-presentation", "true");
+      localStorage.setItem("pantheon:t3-reference-presentation", "true");
     }
   } catch { /* Keep the loaded widths if this preference cannot be saved. */ }
   set({ theme: nextTheme, background: image, zoom: nextZoom, rails: widths });

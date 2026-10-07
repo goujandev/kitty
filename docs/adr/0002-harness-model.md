@@ -4,7 +4,7 @@ Status: proposed
 
 ## Context
 
-kitty drives several vendor CLIs that differ in every dimension: transport
+pantheon drives several vendor CLIs that differ in every dimension: transport
 (bespoke NDJSON, JSON-RPC over stdio, ACP, a local HTTP server with SSE),
 vocabulary, resume mechanism, approval mechanism, model discovery, attachment
 support, and flag spelling. None of them publish a stable protocol contract.
@@ -97,7 +97,7 @@ current rule still collapses two consecutive identical multi-character deltas,
 and upstream has open reports of dropped spaces between words and lost blank
 lines between paragraphs.
 
-kitty reads `DeltaMode` from the manifest and applies the matching rule without
+pantheon reads `DeltaMode` from the manifest and applies the matching rule without
 inspecting content. Whitespace-only chunks are content. When a completed
 message arrives after tokens have streamed, the engine emits the suffix by
 length, not by similarity. This is a correctness property with a test per

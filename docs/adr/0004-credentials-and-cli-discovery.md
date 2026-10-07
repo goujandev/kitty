@@ -4,8 +4,8 @@ Status: proposed
 
 ## Context
 
-kitty holds no model credentials. If `claude` and `codex` are installed and
-logged in, kitty works. That is the entire auth story for inference, and it is
+pantheon holds no model credentials. If `claude` and `codex` are installed and
+logged in, pantheon works. That is the entire auth story for inference, and it is
 why the prototype needs no API keys.
 
 Three adjacent problems remain: finding the CLI binaries, knowing whether each
@@ -56,7 +56,7 @@ rotating Claude's OAuth token", so this is recognized there too.
 output emits a `rate_limit_event` in-band on every turn, carrying
 `unifiedWindows.five_hour` and `seven_day` utilisation and reset times. Codex
 answers `account/rateLimits/read` over its app-server. So both vendors hand us
-the usage data directly, and kitty never needs to read a credential file to
+the usage data directly, and pantheon never needs to read a credential file to
 show it, let alone refresh a token. `MonoCode` impersonates Anthropic's OAuth
 client to fetch the same numbers it could have read out of the stream.
 
@@ -76,7 +76,7 @@ relevant environment overrides, and falls back to `PATH`. Candidates include
 `.ps1` shims npm generates alongside the real executable.
 
 Windows hands a GUI process the environment that existed when it launched, so
-a CLI installed while kitty is running is invisible until the environment is
+a CLI installed while pantheon is running is invisible until the environment is
 re-read. We re-read the user and machine environment on demand and expose a
 rescan action, rather than telling the user to restart the app.
 
@@ -97,7 +97,7 @@ fixes it, rather than hiding them.
 
 ### Our own secrets
 
-If kitty later stores a token for a non-model integration, it goes through the
+If pantheon later stores a token for a non-model integration, it goes through the
 Windows Credential Manager via DPAPI, not into a plaintext file. MonoCode
 writes its GitLab and Linear tokens as plaintext in its app data directory; we
 will not.
@@ -106,9 +106,9 @@ will not.
 
 - We expected to show usage less precisely than a client that refreshes the
   token, and accepted that. It turned out not to be a trade at all: both CLIs
-  report usage themselves, so kitty gets the same numbers without touching a
+  report usage themselves, so pantheon gets the same numbers without touching a
   credential file. The restraint cost nothing.
 - The user must log in with the vendor CLI once. That is already true of
   MonoCode and is the premise of the product.
-- If a provider blocks third-party clients, kitty is unaffected, because
+- If a provider blocks third-party clients, pantheon is unaffected, because
   inference goes through the vendor's own binary.

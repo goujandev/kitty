@@ -1,4 +1,4 @@
-//! Which agent CLIs kitty knows about.
+//! Which agent CLIs pantheon knows about.
 //!
 //! This is the seed of the manifest described in ADR-0002. Slice 1 only needs
 //! the identity, discovery and version fields; transport, codec and capability
@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Version;
 
-/// A CLI kitty can drive.
+/// A CLI pantheon can drive.
 ///
 /// Closed for now. It becomes a lookup over manifests once there are more than
 /// two, which is the point at which a union stops paying for itself.
@@ -73,7 +73,7 @@ pub struct HarnessDescriptor {
     /// what the codecs actually require, so an invented floor would lock out a
     /// working install for no reason. Slice 2 tightens them against evidence.
     pub min_version: Version,
-    /// The newest version a human has actually run kitty against.
+    /// The newest version a human has actually run pantheon against.
     pub verified_version: Version,
     pub install_command: &'static str,
     pub login_command: &'static str,

@@ -7,6 +7,10 @@
 //! bottom of this file makes that impossible here: every migration's text is
 //! pinned by a checksum, so editing a released one fails the build rather than
 //! silently diverging from what shipped.
+//!
+//! Historical product names, control markers and their test fixtures below are
+//! intentional compatibility data. Released SQL stays byte-for-byte unchanged
+//! so Pantheon upgrades recognize and retire older stored orchestration state.
 
 use rusqlite::{Connection, Result};
 

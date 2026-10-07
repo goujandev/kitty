@@ -1,3 +1,4 @@
+import { readPreference } from "./localPreferences";
 /**
  * The projects screen and search, held outside React.
  *
@@ -38,7 +39,7 @@ export interface ProjectState {
 
 function readExpanded(): Record<string, boolean> {
   try {
-    const saved: unknown = JSON.parse(localStorage.getItem("kitty.expandedProjects") ?? "{}");
+    const saved: unknown = JSON.parse(readPreference("expandedProjects") ?? "{}");
     return saved && typeof saved === "object" ? saved as Record<string, boolean> : {};
   } catch { return {}; }
 }
@@ -141,7 +142,7 @@ export function setExpanded(projectId: string, open: boolean): void {
   const expanded = { ...state.expanded, [projectId]: open };
   if (!open) delete expanded[projectId];
   set({ expanded });
-  try { localStorage.setItem("kitty.expandedProjects", JSON.stringify(expanded)); } catch { /* Storage may be unavailable. */ }
+  try { localStorage.setItem("pantheon.expandedProjects", JSON.stringify(expanded)); } catch { /* Storage may be unavailable. */ }
   if (open && !state.chats[projectId]) void loadChats(projectId);
 }
 

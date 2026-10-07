@@ -65,7 +65,7 @@ Click to see it full size`}
 }
 
 /**
- * The URL for a path, on kitty's own scheme.
+ * The URL for a path, on pantheon's own scheme.
  *
  * Bytes over a protocol handler rather than base64 in the transcript: a 3MB
  * render becomes 4MB of text in the database, in memory and across IPC if you
@@ -76,7 +76,7 @@ Click to see it full size`}
 export function pictureUrl(path: string): string {
   // The browser preview's pretend host hands out pictures it already holds.
   if (path.startsWith("data:")) return path;
-  return `http://kitty.localhost/${encodeURIComponent(path)}`;
+  return `http://pantheon.localhost/${encodeURIComponent(path)}`;
 }
 
 /** Text documents attached to a message, recorded on its row. */

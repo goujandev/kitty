@@ -3,20 +3,20 @@ resolver = "2"
 members = ["crates/core", "crates/probe", "crates/supervisor", "crates/harness", "crates/engine", "crates/store", "crates/catalog", "src-tauri"]
 
 [workspace.package]
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 rust-version = "1.88"
 license = "MIT"
-repository = "https://github.com/goujan/kitty"
+repository = "https://github.com/goujandev/kitty"
 
 [workspace.dependencies]
-kitty-core = { path = "crates/core" }
-kitty-probe = { path = "crates/probe" }
-kitty-supervisor = { path = "crates/supervisor" }
-kitty-harness = { path = "crates/harness" }
-kitty-engine = { path = "crates/engine" }
-kitty-store = { path = "crates/store" }
-kitty-catalog = { path = "crates/catalog" }
+pantheon-core = { path = "crates/core" }
+pantheon-probe = { path = "crates/probe" }
+pantheon-supervisor = { path = "crates/supervisor" }
+pantheon-harness = { path = "crates/harness" }
+pantheon-engine = { path = "crates/engine" }
+pantheon-store = { path = "crates/store" }
+pantheon-catalog = { path = "crates/catalog" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

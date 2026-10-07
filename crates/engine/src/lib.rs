@@ -21,10 +21,10 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use kitty_core::{ApprovalOutcome, ErrorKind, HarnessId, SessionEvent, StopReason};
-use kitty_harness::{codec_for, launch_args, Codec, StartContext};
-pub use kitty_harness::{ImageInput, TurnInput};
-use kitty_supervisor::{spawn, Child, ChildEvent, Frame, SpawnSpec};
+use pantheon_core::{ApprovalOutcome, ErrorKind, HarnessId, SessionEvent, StopReason};
+use pantheon_harness::{codec_for, launch_args, Codec, StartContext};
+pub use pantheon_harness::{ImageInput, TurnInput};
+use pantheon_supervisor::{spawn, Child, ChildEvent, Frame, SpawnSpec};
 
 /// How a session is started.
 #[derive(Debug, Clone)]
@@ -33,7 +33,7 @@ pub struct SessionSpec {
     pub turn_start_timeout: Duration,
     pub approval_mode: ApprovalMode,
     pub harness: HarnessId,
-    /// Resolved executable, from `kitty_probe`.
+    /// Resolved executable, from `pantheon_probe`.
     pub binary: PathBuf,
     pub cwd: PathBuf,
     /// Vendor session or thread id to continue, when we have one.
@@ -83,16 +83,19 @@ pub enum ApprovalMode {
 
 impl ApprovalMode {
     #[must_use]
-    pub fn approves(self, kind: kitty_core::ApprovalKind) -> bool {
+    pub fn approves(self, kind: pantheon_core::ApprovalKind) -> bool {
         matches!(self, Self::Auto)
-            || matches!((self, kind), (Self::Edits, kitty_core::ApprovalKind::Edit))
+            || matches!(
+                (self, kind),
+                (Self::Edits, pantheon_core::ApprovalKind::Edit)
+            )
     }
 }
 
 #[cfg(test)]
 mod approval_mode_tests {
     use super::ApprovalMode;
-    use kitty_core::ApprovalKind;
+    use pantheon_core::ApprovalKind;
 
     #[test]
     fn modes_only_approve_the_requested_categories() {
@@ -306,7 +309,7 @@ struct Pump {
     /// Tracked here rather than in a codec because every harness has them and
     /// the rules are the same: a cancel denies them, and a turn ending
     /// abandons them (ADR-0002).
-    pending: Vec<(String, kitty_core::ApprovalKind)>,
+    pending: Vec<(String, pantheon_core::ApprovalKind)>,
 }
 
 impl Pump {
@@ -475,7 +478,7 @@ impl Pump {
     ///
     /// Turn bookkeeping lives here, in one place, which is the whole reason
     /// the codecs do not have to agree on how to do it.
-    fn dispatch(&mut self, step: kitty_harness::Step) {
+    fn dispatch(&mut self, step: pantheon_harness::Step) {
         for line in step.send {
             if !self.child.write_line(line) {
                 self.emit(SessionEvent::Error {

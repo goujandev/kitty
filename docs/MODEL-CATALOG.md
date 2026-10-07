@@ -1,8 +1,8 @@
 # Model catalog
 
-The requirement is every Anthropic model and every OpenAI model. Because kitty
+The requirement is every Anthropic model and every OpenAI model. Because pantheon
 drives the vendor CLIs, the honest and complete answer is to ask them. Whatever
-your subscription exposes is what you see, and it stays current without kitty
+your subscription exposes is what you see, and it stays current without pantheon
 shipping a release.
 
 ## Discovery
@@ -58,7 +58,7 @@ loading state instead, which is the better default.
 The picker always allows typing a model id the probe did not return. It is
 passed to the CLI verbatim and marked custom in the UI.
 
-This costs one text field and removes an entire class of "kitty does not
+This costs one text field and removes an entire class of "pantheon does not
 support the model that shipped this morning" problem. MonoCode lacks it and has
 an open pull request adding it.
 

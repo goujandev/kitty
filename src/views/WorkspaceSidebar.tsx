@@ -10,7 +10,7 @@ import { ActionMenu, type ActionMenuHandle, type MenuItem } from "./ActionMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { focusChatRow, focusChooser, focusComposer, focusProjectRow } from "./focus";
 import { Grip } from "./Grip";
-import { Icon } from "./Icon";
+import { Icon, PantheonMark } from "./Icon";
 import { InlineRename } from "./InlineRename";
 import { ProjectMonogram } from "./ProjectMonogram";
 import type { ProjectActivity } from "../stores/projectActivity";
@@ -131,7 +131,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps): React.ReactEleme
     const items: MenuItem[] = [
       { label: "New chat", shortcut: active ? "Ctrl+N" : undefined, onSelect: () => props.onNewChat(project.id) },
       { label: "Rename", shortcut: "F2", onSelect: () => setRenaming({ kind: "project", id: project.id }) },
-      { label: "Remove from Kitty…", danger: true, separatorBefore: true, onSelect: () => setConfirming({ kind: "project", project }) },
+      { label: "Remove from Pantheon…", danger: true, separatorBefore: true, onSelect: () => setConfirming({ kind: "project", project }) },
     ];
     if (!project.exists) items.shift();
     return <li key={project.id} data-project-id={project.id} className={`ws-project${active ? " is-active" : ""}${open ? " is-open" : ""}${activity?.unread ? " is-unread" : ""}${drag.dragging === project.id ? " is-dragging" : ""}`}>
@@ -146,7 +146,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps): React.ReactEleme
         </button>
         {isRenaming
           ? <InlineRename initial={project.name} what="project" label="Rename project" className="ws-project__rename"
-              hint={`Only the name in Kitty changes. The folder stays ${project.root?.split(/[\\/]/).filter(Boolean).pop() ?? ""}.`}
+              hint={`Only the name in Pantheon changes. The folder stays ${project.root?.split(/[\\/]/).filter(Boolean).pop() ?? ""}.`}
               onSave={name => void renameProject(project.id, name)}
               onDone={() => { setRenaming(null); focusProjectRow(project.id); }} />
           : <button type="button" className="ws-project__open" aria-current={active ? "true" : undefined}
@@ -187,7 +187,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps): React.ReactEleme
     if (target.kind === "chat") {
       const working = target.chat.id in chat.running;
       return <>
-        <p>This permanently removes the conversation and its history from Kitty. It can't be undone.</p>
+        <p>This permanently removes the conversation and its history from Pantheon. It can't be undone.</p>
         <p>Files in the project aren't changed. {AGENT[target.chat.harness] ?? "The agent"} keeps its own record of the session.</p>
         {working && <p>The agent working in this chat will be stopped.</p>}
       </>;
@@ -195,7 +195,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps): React.ReactEleme
     const count = target.project.sessionCount;
     return <>
       <p>The folder <span className="confirm-dialog__path">{target.project.root}</span> and everything in it stay on your computer.</p>
-      <p>{count === 0 ? "It has no saved chats." : `Its ${count} saved ${count === 1 ? "chat" : "chats"} in Kitty will be permanently deleted.`}</p>
+      <p>{count === 0 ? "It has no saved chats." : `Its ${count} saved ${count === 1 ? "chat" : "chats"} in Pantheon will be permanently deleted.`}</p>
     </>;
   };
 
@@ -233,7 +233,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps): React.ReactEleme
   return <aside className={`ws-sidebar ws-sidebar--projects${props.collapsed ? " ws-sidebar--collapsed" : ""}`} ref={resize.setPaneRef} aria-label="Projects and chats" data-app-sidebar>
     <header className="ws-sidebar__head" data-tauri-drag-region>
       <button type="button" className="ws-icon-button" aria-label={props.collapsed ? "Expand sidebar" : "Collapse sidebar"} title={`${props.collapsed ? "Expand" : "Collapse"} sidebar (Ctrl+B)`} aria-keyshortcuts="Control+B" onClick={props.onToggleCollapse}><Icon name={props.collapsed ? "panel" : "panelClose"} size={16} /></button>
-      {!props.collapsed && <span className="ws-brand" data-tauri-drag-region>Kitty</span>}
+      {!props.collapsed && <span className="ws-brand" data-tauri-drag-region><PantheonMark size={24} />Pantheon</span>}
     </header>
     <nav className="ws-primary" aria-label="Start">
       {primary.map(action => <button key={action.label} type="button" className="ws-action" aria-label={props.collapsed ? action.label : undefined}
@@ -264,7 +264,7 @@ export function WorkspaceSidebar(props: WorkspaceSidebarProps): React.ReactEleme
     </footer>
     {!props.collapsed && <Grip resize={resize} label="Resize sidebar" />}
     {confirming && <ConfirmDialog
-      title={confirming.kind === "chat" ? `Delete “${chatTitle(confirming.chat)}”?` : `Remove “${confirming.project.name}” from Kitty?`}
+      title={confirming.kind === "chat" ? `Delete “${chatTitle(confirming.chat)}”?` : `Remove “${confirming.project.name}” from Pantheon?`}
       confirmLabel={confirming.kind === "chat" ? "Delete chat" : "Remove project"}
       workingLabel={confirming.kind === "chat" ? "Deleting…" : "Removing…"}
       onConfirm={() => runConfirm(confirming)}

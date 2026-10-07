@@ -41,7 +41,7 @@ turn, answer an approval, cancel; events carrying batches of normalized session
 events targeted at the owning window. Raw CLI output never crosses the
 boundary except into the optional protocol log viewer.
 
-### Why this is right for kitty specifically
+### Why this is right for pantheon specifically
 
 - **Performance.** Decode, batch and persist happen once, off the UI thread,
   and the webview receives coalesced normalized events rather than a per-line
@@ -86,7 +86,7 @@ vocabulary.
   sent. This is the point.
 - The IPC surface stays small. MonoCode has 164 Tauri commands in one flat
   registration block, with a single 6,550-line file holding 53 of them across
-  four unrelated concerns; kitty groups commands per crate and keeps the
+  four unrelated concerns; pantheon groups commands per crate and keeps the
   session surface narrow.
 - Rust is now on the critical path for every protocol fix. The fixture tooling
   is therefore not optional polish; it is a prerequisite.

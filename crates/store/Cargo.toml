@@ -1,5 +1,5 @@
 [package]
-name = "kitty-store"
+name = "pantheon-store"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,7 +10,7 @@ description = "SQLite persistence: projects, sessions, transcript blocks."
 workspace = true
 
 [dependencies]
-kitty-core = { workspace = true }
+pantheon-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 rusqlite = { version = "0.37", features = ["bundled"] }

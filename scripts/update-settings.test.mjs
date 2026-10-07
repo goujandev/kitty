@@ -8,22 +8,22 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
 const require = createRequire(import.meta.url);
 const moduleUrl = text => 'data:text/javascript;base64,' + Buffer.from(text).toString('base64');
-const storeUrl = moduleUrl('export const updates = {}; export const useUpdates = () => globalThis.kittyTestUpdates;');
-const chatUrl = moduleUrl('export const useChat = () => ({running: globalThis.kittyTestRunning});');
+const storeUrl = moduleUrl('export const updates = {}; export const useUpdates = () => globalThis.pantheonTestUpdates;');
+const chatUrl = moduleUrl('export const useChat = () => ({running: globalThis.pantheonTestRunning});');
 let source = readFileSync(new URL('../src/views/UpdateSettings.tsx', import.meta.url), 'utf8');
 source = source.replace('../stores/updateStore', storeUrl).replace('../stores/chatStore', chatUrl);
 let code = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 code = code.replace('react/jsx-runtime', pathToFileURL(require.resolve('react/jsx-runtime')).href);
 const { UpdateSettings } = await import(moduleUrl(code));
 const render = (state = {}, running = {}) => {
- globalThis.kittyTestUpdates = { phase: 'current', currentVersion: '0.1.1', version: '0.1.2', notes: null, downloaded: 0, total: null, checkedAt: null, error: null, ...state };
- globalThis.kittyTestRunning = running;
+ globalThis.pantheonTestUpdates = { phase: 'current', currentVersion: '0.1.1', version: '0.1.2', notes: null, downloaded: 0, total: null, checkedAt: null, error: null, ...state };
+ globalThis.pantheonTestRunning = running;
  return renderToStaticMarkup(createElement(UpdateSettings));
 };
 test('Settings shows installed and available versions with an explicit download button', () => {
  const html = render({ phase: 'available' });
- assert.match(html, /Kitty 0.1.1/);
- assert.match(html, /Kitty 0.1.2 is available/);
+ assert.match(html, /Pantheon 0.1.1/);
+ assert.match(html, /Pantheon 0.1.2 is available/);
  assert.match(html, />Check for updates<\/button>/);
  assert.match(html, />Download update<\/button>/);
  assert.doesNotMatch(html, />Restart and install<\/button>/);

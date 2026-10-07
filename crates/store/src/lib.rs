@@ -20,7 +20,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 pub use ids::{new_id, now_ms};
-pub use kitty_core::BlockKind;
+pub use pantheon_core::BlockKind;
 
 #[derive(Debug)]
 pub enum StoreError {
@@ -89,7 +89,7 @@ pub struct SessionRow {
     pub title: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
-    /// When the chat was archived, or None while it is in the list. Kitty's
+    /// When the chat was archived, or None while it is in the list. Pantheon's
     /// own filing; the provider's session is untouched either way.
     pub archived_at: Option<i64>,
 }
@@ -334,7 +334,7 @@ impl Store {
         })
     }
 
-    /// Renames a project in Kitty. The folder on disk keeps its name.
+    /// Renames a project in Pantheon. The folder on disk keeps its name.
     pub fn rename_project(&self, project_id: &str, name: &str) -> Result<Project> {
         let name = clean_name(name, "project")?;
         self.write(|conn| {
@@ -523,7 +523,7 @@ impl Store {
         })
     }
 
-    /// Renames a chat. The title is Kitty's; no provider is told.
+    /// Renames a chat. The title is Pantheon's; no provider is told.
     pub fn rename_session(&self, session_id: &str, title: &str) -> Result<SessionRow> {
         let title = clean_name(title, "chat")?;
         self.write(|conn| {
@@ -554,7 +554,7 @@ impl Store {
 
     /// Files a chat away, or brings it back.
     ///
-    /// Only Kitty's list changes. The transcript and the provider's session id
+    /// Only Pantheon's list changes. The transcript and the provider's session id
     /// are kept, so a restored chat carries on where it stopped.
     pub fn set_session_archived(&self, session_id: &str, archived: bool) -> Result<SessionRow> {
         self.write(|conn| {
@@ -788,7 +788,7 @@ impl Store {
         &self,
         session_id: &str,
         stop: &str,
-        usage: kitty_core::Usage,
+        usage: pantheon_core::Usage,
     ) -> Result<()> {
         self.write(|conn| {
             let seq: i64 = conn.query_row(

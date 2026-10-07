@@ -102,7 +102,7 @@ def main() -> int:
     init = request(
         "initialize",
         {
-            "clientInfo": {"name": "kitty", "title": "kitty", "version": "0.1.0"},
+            "clientInfo": {"name": "pantheon", "title": "Pantheon", "version": "0.1.0"},
             "capabilities": {"experimentalApi": True},
         },
     )

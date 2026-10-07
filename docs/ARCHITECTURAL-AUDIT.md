@@ -21,7 +21,7 @@ The current crate boundaries are useful. Fixing the ownership and lifecycle cont
 | UI | React 19, custom transcript virtualization, Markdown sanitization |
 | State | Module-level external stores using `useSyncExternalStore` |
 | IPC | TypeScript command wrappers to Tauri commands; transcript events flow back |
-| Agent execution | Rust `kitty-engine`; one session pump per CLI process |
+| Agent execution | Rust `pantheon-engine`; one session pump per CLI process |
 | Providers | Claude stream-JSON and Codex JSON-RPC codecs |
 | Processes | Rust supervisor, stdio reader/writer threads, Windows Job Objects |
 | Workspace access | Vendor CLIs execute tools in the project directory |
@@ -542,7 +542,7 @@ Checks re-run on the working tree: `cargo clippy --workspace --all-targets -- -D
 - [`package.json`](../package.json), line 26: `@types/dompurify` is redundant; DOMPurify 3 ships `dist/purify.cjs.d.ts`.
 - [`src/main.tsx`](../src/main.tsx), line 11: `React.StrictMode` double-runs the startup effect in `App.tsx:47-59` in development, so `restoreLastProject` and `initialise` execute twice. Harmless in release, but it doubles the probe count from S02 during dev testing.
 - [`crates/store/src/lib.rs`](../crates/store/src/lib.rs), `configure`, lines 650–659: no `journal_size_limit` and no checkpoint on close, which is why the WAL is sixteen times the database size. Add `PRAGMA wal_checkpoint(TRUNCATE)` on shutdown.
-- [`src-tauri/src/lib.rs`](../src-tauri/src/lib.rs), `run`, line 1081: the `kitty://` picture handler uses the synchronous `register_uri_scheme_protocol`, so the file read in `picture_response` (line 103) runs on the main thread. Switch to `register_asynchronous_uri_scheme_protocol`. R06 covers the size budget; this is the thread.
+- [`src-tauri/src/lib.rs`](../src-tauri/src/lib.rs), `run`, line 1081: the `pantheon://` picture handler uses the synchronous `register_uri_scheme_protocol`, so the file read in `picture_response` (line 103) runs on the main thread. Switch to `register_asynchronous_uri_scheme_protocol`. R06 covers the size budget; this is the thread.
 
 ## Cross-reference: second-pass findings already recorded above
 

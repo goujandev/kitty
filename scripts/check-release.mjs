@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 export function checkVersions(tag) {
  const config = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+ assert.equal(config.productName, 'Pantheon', 'The installer must use current product branding');
+ assert.equal(config.identifier, 'dev.kitty.desktop', 'Keep the installed identity so upgrades retain user data');
  const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
  const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'));
  assert.equal(config.version, lock.version, 'npm lockfile version must match');

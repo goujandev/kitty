@@ -93,7 +93,7 @@ SOFTWARE.
 
 Microsoft ONNX Runtime 1.24.2 is downloaded separately on first use.
 Its LICENSE and ThirdPartyNotices.txt are retained beside its DLLs in
-Kitty's app-data dictation folder. Source: https://github.com/microsoft/onnxruntime
+Pantheon's app-data dictation folder. Source: https://github.com/microsoft/onnxruntime
 
 
 cpal-0.16.0

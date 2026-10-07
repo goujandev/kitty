@@ -5,8 +5,8 @@
 //! exemption is stated here instead.
 #![allow(clippy::expect_used)]
 
-use kitty_core::Usage;
-use kitty_store::{BlockKind, Store};
+use pantheon_core::Usage;
+use pantheon_store::{BlockKind, Store};
 
 fn store() -> Store {
     Store::in_memory().expect("open in-memory store")
@@ -15,7 +15,7 @@ fn store() -> Store {
 fn seeded() -> (Store, String) {
     let store = store();
     let project = store
-        .open_project(std::path::Path::new(r"C:\work\kitty"))
+        .open_project(std::path::Path::new(r"C:\work\pantheon"))
         .expect("project");
     let session = store
         .create_session(&project.id, "claude", Some("claude-opus-5"))
@@ -26,13 +26,13 @@ fn seeded() -> (Store, String) {
 #[test]
 fn opening_the_same_directory_twice_reuses_the_project() {
     let store = store();
-    let path = std::path::Path::new(r"C:\work\kitty");
+    let path = std::path::Path::new(r"C:\work\pantheon");
 
     let first = store.open_project(path).expect("first");
     let second = store.open_project(path).expect("second");
 
     assert_eq!(first.id, second.id, "a project must not be duplicated");
-    assert_eq!(second.name, "kitty", "the name comes from the folder");
+    assert_eq!(second.name, "pantheon", "the name comes from the folder");
     assert_eq!(store.list_projects().expect("list").len(), 1);
 }
 
@@ -157,7 +157,7 @@ fn the_first_message_titles_the_session_and_later_ones_do_not() {
 fn a_list_stays_where_it_was_put() {
     let store = store();
     let project = store
-        .open_project(std::path::Path::new(r"C:\work\kitty"))
+        .open_project(std::path::Path::new(r"C:\work\pantheon"))
         .expect("project");
 
     let first = store
@@ -323,7 +323,7 @@ fn settings_round_trip_and_overwrite() {
 fn a_transcript_survives_closing_and_reopening_the_file() {
     // Acceptance criterion 6, at the storage layer.
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("kitty.db");
+    let path = dir.path().join("pantheon.db");
 
     let session_id = {
         let store = Store::open(&path).expect("open");
@@ -365,7 +365,7 @@ fn an_unused_session_is_pruned_and_a_used_one_is_not() {
     // Picking an agent and changing your mind should leave nothing behind.
     let store = store();
     let project = store
-        .open_project(std::path::Path::new(r"C:\work\kitty"))
+        .open_project(std::path::Path::new(r"C:\work\pantheon"))
         .expect("project");
 
     let used = store
@@ -408,7 +408,7 @@ fn a_migration_added_after_release_applies_to_an_existing_database() {
     // Migration 2 added `blocks.meta`. A database created before it must gain
     // the column on open, which is the whole point of forward-only migrations.
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("kitty.db");
+    let path = dir.path().join("pantheon.db");
 
     let session_id = {
         let store = Store::open(&path).expect("open");
@@ -443,7 +443,7 @@ fn a_block_without_meta_reads_back_as_none() {
 #[test]
 fn deleting_a_project_removes_its_sessions_and_their_search_entries() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = Store::open(dir.path().join("kitty.db")).expect("open");
+    let store = Store::open(dir.path().join("pantheon.db")).expect("open");
 
     let kept = store
         .open_project(&dir.path().join("kept"))
@@ -539,7 +539,7 @@ fn a_chat_takes_its_name_from_what_was_asked() {
 fn a_folder_project_keeps_its_folder_name() {
     let store = store();
     let project = store
-        .open_project(std::path::Path::new(r"C:\code\kitty"))
+        .open_project(std::path::Path::new(r"C:\code\pantheon"))
         .expect("project");
     let session = store
         .create_session(&project.id, "claude", None)
@@ -556,7 +556,7 @@ fn a_folder_project_keeps_its_folder_name() {
         .find(|p| p.id == project.id)
         .expect("still there");
     assert_eq!(
-        named.name, "kitty",
+        named.name, "pantheon",
         "a folder project is named after its folder, not after one question"
     );
 }
@@ -604,15 +604,15 @@ fn opening_a_project_by_id_marks_it_opened() {
 fn adding_a_folder_again_selects_the_existing_project_however_it_is_spelled() {
     let store = store();
     let (first, created) = store
-        .add_project(std::path::Path::new(r"C:\Work\Kitty"))
+        .add_project(std::path::Path::new(r"C:\Work\Pantheon"))
         .expect("first");
     assert!(created);
 
     for spelling in [
-        r"C:\Work\Kitty",
-        r"c:\work\kitty\",
-        "C:/Work/Kitty",
-        r"\\?\C:\Work\Kitty",
+        r"C:\Work\Pantheon",
+        r"c:\work\pantheon\",
+        "C:/Work/Pantheon",
+        r"\\?\C:\Work\Pantheon",
     ] {
         let (again, created) = store
             .add_project(std::path::Path::new(spelling))
@@ -623,44 +623,44 @@ fn adding_a_folder_again_selects_the_existing_project_however_it_is_spelled() {
     assert_eq!(store.list_projects().expect("list").len(), 1);
 
     let (other, created) = store
-        .add_project(std::path::Path::new(r"C:\Work\Kitty-two"))
+        .add_project(std::path::Path::new(r"C:\Work\Pantheon-two"))
         .expect("other");
     assert!(created, "a different folder is a different project");
     assert_ne!(other.id, first.id);
 }
 
 #[test]
-fn renaming_a_project_changes_only_its_name_in_kitty() {
+fn renaming_a_project_changes_only_its_name_in_pantheon() {
     let store = store();
     let project = store
-        .open_project(std::path::Path::new(r"C:\code\kitty"))
+        .open_project(std::path::Path::new(r"C:\code\pantheon"))
         .expect("project");
 
     let renamed = store
-        .rename_project(&project.id, "  Kitty   desktop ")
+        .rename_project(&project.id, "  Pantheon   desktop ")
         .expect("rename");
-    assert_eq!(renamed.name, "Kitty desktop", "whitespace is tidied");
+    assert_eq!(renamed.name, "Pantheon desktop", "whitespace is tidied");
     assert_eq!(
         renamed.root.as_deref(),
-        Some(r"C:\code\kitty"),
+        Some(r"C:\code\pantheon"),
         "the folder is unchanged"
     );
 
     let refused = store.rename_project(&project.id, "   ");
     assert!(
-        matches!(refused, Err(kitty_store::StoreError::Invalid { .. })),
+        matches!(refused, Err(pantheon_store::StoreError::Invalid { .. })),
         "an empty name is refused"
     );
     assert_eq!(
         store.list_projects().expect("list")[0].name,
-        "Kitty desktop"
+        "Pantheon desktop"
     );
 
     // Opening the folder again keeps the name the user chose.
     let reopened = store
-        .open_project(std::path::Path::new(r"C:\code\kitty"))
+        .open_project(std::path::Path::new(r"C:\code\pantheon"))
         .expect("reopen");
-    assert_eq!(reopened.name, "Kitty desktop");
+    assert_eq!(reopened.name, "Pantheon desktop");
     assert!(store.rename_project("missing", "Name").is_err());
 }
 
@@ -687,7 +687,7 @@ fn a_renamed_chat_keeps_its_title_and_an_empty_one_is_refused() {
 
     assert!(matches!(
         store.rename_session(&session, " \n\t "),
-        Err(kitty_store::StoreError::Invalid { .. })
+        Err(pantheon_store::StoreError::Invalid { .. })
     ));
     assert_eq!(
         store.session(&session).expect("session").title.as_deref(),
@@ -727,7 +727,7 @@ fn archiving_a_chat_keeps_its_history_and_provider_session() {
 
 #[test]
 fn automatic_titles_are_short_readable_sentences() {
-    use kitty_store::derive_title;
+    use pantheon_store::derive_title;
 
     assert_eq!(derive_title("  explain the build  "), "explain the build");
     assert_eq!(
@@ -764,7 +764,7 @@ fn deleting_a_project_leaves_its_folder_on_disk() {
     assert_eq!(store.list_projects().expect("list").len(), 0);
     assert!(
         store.session(&session.id).is_err(),
-        "its chats are gone from Kitty"
+        "its chats are gone from Pantheon"
     );
     assert!(dir.path().is_dir(), "the folder stays");
     assert_eq!(

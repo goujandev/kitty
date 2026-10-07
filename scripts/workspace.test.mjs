@@ -31,7 +31,7 @@ test('the product carries no agent-team vocabulary', () => {
     ...files('crates', /\.rs$/).filter(path => !/[\\/]store[\\/]src[\\/]migrations\.rs$/.test(path) && !/[\\/]target[\\/]/.test(path)),
   ];
   assert.ok(sources.length > 50, 'the scan must cover the source tree');
-  const forbidden = /\b(boss|team ?lead|orchestrat\w*|delegat\w*|kitty-(delegate|assignment|progress)|worker pane|subordinate)\b/i;
+  const forbidden = /\b(boss|team ?lead|orchestrat\w*|delegat\w*|pantheon-(delegate|assignment|progress)|worker pane|subordinate)\b/i;
   const hits = sources.flatMap(path => readFileSync(path, 'utf8').split(/\r?\n/)
     .map((line, index) => forbidden.test(line) ? `${path.slice(root.length)}:${index + 1}: ${line.trim()}` : null)
     .filter(Boolean));

@@ -73,12 +73,12 @@ export class UpdateController {
   async install(hasRunningTurns: boolean): Promise<void> {
     if (this.state.phase !== "ready" || !this.update) return;
     if (hasRunningTurns) {
-      this.set({ error: "Wait for running conversations to finish before restarting Kitty." });
+      this.set({ error: "Wait for running conversations to finish before restarting Pantheon." });
       return;
     }
     this.set({ phase: "installing", error: null });
     try {
-      // Windows exits Kitty after starting NSIS; the installer relaunches it.
+      // Windows exits Pantheon after starting NSIS; the installer relaunches it.
       await this.update.install({ restartAfterInstall: true });
       this.set({ phase: "installed" });
     } catch (error) {

@@ -4,11 +4,11 @@ Status: accepted (confirmed by the user, 2026-09-14)
 
 ## Context
 
-kitty is a desktop GUI that drives coding-agent CLIs. It needs native child
+pantheon is a desktop GUI that drives coding-agent CLIs. It needs native child
 process control including process-tree kill on Windows, a rich text and code
 surface (transcript, diffs, editor, terminal), SQLite, and low idle cost.
 
-The user confirmed two things directly: kitty should be a desktop GUI, and it
+The user confirmed two things directly: pantheon should be a desktop GUI, and it
 should get inference the way MonoCode does, by driving the vendor CLIs.
 
 ## Decision
@@ -59,7 +59,7 @@ sequences into the protocol.
 
 ### Windows is the only target
 
-kitty targets Windows and nothing else. There is no macOS or Linux support, no
+pantheon targets Windows and nothing else. There is no macOS or Linux support, no
 abstraction layer anticipating them, and no CI matrix. Platform code is written
 directly against the Win32 APIs that do the job.
 

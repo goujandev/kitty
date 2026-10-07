@@ -32,7 +32,7 @@ const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
 /// left behind. `MonoCode` uses the same trick and it is worth keeping even
 /// with job objects, because a job cannot outlive a process that was killed
 /// before it could create one.
-pub const PARENT_MARKER: &str = "KITTY_SUPERVISOR_PARENT";
+pub const PARENT_MARKER: &str = "PANTHEON_SUPERVISOR_PARENT";
 
 #[derive(Debug, Clone)]
 pub struct SpawnSpec {
@@ -444,14 +444,15 @@ mod tests {
     fn writes_reach_the_child() {
         // `findstr` echoes matching stdin lines, so this proves the write path
         // end to end without needing a real CLI.
-        let spec = SpawnSpec::new("cmd.exe", std::env::temp_dir()).args(["/C", "findstr", "kitty"]);
+        let spec =
+            SpawnSpec::new("cmd.exe", std::env::temp_dir()).args(["/C", "findstr", "pantheon"]);
         let mut child = spawn(&spec).expect("spawn");
-        assert!(child.write_line("hello kitty"));
+        assert!(child.write_line("hello pantheon"));
         assert!(child.write_line("unrelated"));
         child.close_stdin();
 
         let (lines, _) = collect_until_exit(&mut child, Duration::from_secs(20));
-        assert_eq!(lines, vec!["hello kitty".to_owned()]);
+        assert_eq!(lines, vec!["hello pantheon".to_owned()]);
     }
 
     #[test]

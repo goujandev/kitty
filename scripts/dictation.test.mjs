@@ -42,7 +42,7 @@ test('native microphone and recognition errors expose their recovery instruction
 
 test('dictation replaces the captured selection and retains surrounding typed text', () => {
   assert.deepEqual(insertDictation(draft, ' update '), { text: 'Please update this.', caret: 13 });
-  assert.deepEqual(insertDictation({ ...draft, text: 'Hello, world!', start: 5, end: 5 }, 'Kitty'), { text: 'Hello Kitty, world!', caret: 11 });
+  assert.deepEqual(insertDictation({ ...draft, text: 'Hello, world!', start: 5, end: 5 }, 'Pantheon'), { text: 'Hello Pantheon, world!', caret: 14 });
   assert.equal(insertDictation({ ...draft, text: 'Line one\n', start: 9, end: 9 }, 'Line two').text, 'Line one\nLine two');
 });
 

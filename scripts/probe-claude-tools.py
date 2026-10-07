@@ -52,7 +52,7 @@ def main() -> int:
 
     # A file to read, so the turn definitely needs a tool.
     target = ROOT / "NOTICE-TEST.txt"
-    target.write_text("kitty tool probe\n", encoding="utf-8")
+    target.write_text("pantheon tool probe\n", encoding="utf-8")
 
     proc = subprocess.Popen(
         resolve_claude() + ARGS,

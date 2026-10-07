@@ -20,9 +20,9 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use kitty_core::{BlockKind, SessionEvent, StopReason, ToolStatus, TranscriptEvent, Usage};
-use kitty_engine::Session;
-use kitty_store::Store;
+use pantheon_core::{BlockKind, SessionEvent, StopReason, ToolStatus, TranscriptEvent, Usage};
+use pantheon_engine::Session;
+use pantheon_store::Store;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -32,7 +32,7 @@ const EMIT_EVERY: Duration = Duration::from_millis(16);
 const PERSIST_EVERY: Duration = Duration::from_millis(300);
 
 /// The event the frontend listens for.
-pub const TRANSCRIPT_EVENT: &str = "kitty://transcript";
+pub const TRANSCRIPT_EVENT: &str = "pantheon://transcript";
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -62,7 +62,7 @@ impl Sink for AppHandle {
         // reply that never arrived, and nothing in the app ever mentions it.
         if let Err(error) = self.emit(TRANSCRIPT_EVENT, &Batch { session_id, events }) {
             eprintln!(
-                "kitty: {} transcript events for {session_id} were not delivered: {error}",
+                "pantheon: {} transcript events for {session_id} were not delivered: {error}",
                 events.len()
             );
         }
@@ -467,7 +467,7 @@ impl<S: Sink> Transcript<S> {
     /// without ever saying where it went -- "Here's your cat" and nothing
     /// else. There is no path in the transcript to find, so this does not look
     /// for one: the folder is named after the thread id, which is the same id
-    /// kitty already keeps to resume the conversation.
+    /// pantheon already keeps to resume the conversation.
     fn attach_pictures(&mut self) {
         let Some(seq) = self.last_assistant else {
             return;
@@ -596,7 +596,7 @@ fn stop_label(stop: &StopReason) -> &'static str {
 mod tests {
     use std::sync::mpsc::channel;
 
-    use kitty_core::StopReason;
+    use pantheon_core::StopReason;
 
     use super::{
         BlockKind, HashMap, Instant, SessionEvent, Sink, Store, Transcript, TranscriptEvent, Usage,
@@ -678,7 +678,7 @@ mod tests {
     #[test]
     fn agent_errors_survive_transcript_reload() {
         let (recorder, store, session) = run(vec![SessionEvent::Error {
-            error_kind: kitty_core::ErrorKind::Protocol,
+            error_kind: pantheon_core::ErrorKind::Protocol,
             message: "the app-server rejected a request".into(),
             retryable: false,
         }]);
@@ -775,7 +775,7 @@ mod tests {
             },
             SessionEvent::ToolEnded {
                 call_id: "call-1".to_owned(),
-                status: kitty_core::ToolStatus::Ok,
+                status: pantheon_core::ToolStatus::Ok,
                 detail: None,
             },
             SessionEvent::MessageDelta {

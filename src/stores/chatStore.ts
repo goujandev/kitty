@@ -1,3 +1,4 @@
+import { readPreference } from "./localPreferences";
 /**
  * Everything the chat screen renders, held outside React.
  *
@@ -41,7 +42,7 @@ import { isActivityEvent, ProjectActivityTracker, type ProjectActivity } from ".
 export type { ProjectActivity, ProjectActivityStatus } from "./projectActivity";
 
 function readUnreadActivity(): unknown {
-  try { return JSON.parse(localStorage.getItem("kitty.projectUnread") ?? "{}"); }
+  try { return JSON.parse(readPreference("projectUnread") ?? "{}"); }
   catch { return {}; }
 }
 const activity = new ProjectActivityTracker(readUnreadActivity());
@@ -50,7 +51,7 @@ const pendingActivity = new Map<string, TranscriptEvent[]>();
 let savedUnreadActivity = JSON.stringify(activity.unread());
 
 function readTimings(): Record<string, Record<number, TurnTiming>> {
-  try { return JSON.parse(localStorage.getItem("kitty.turnTimings") ?? "{}"); }
+  try { return JSON.parse(readPreference("turnTimings") ?? "{}"); }
   catch { return {}; }
 }
 const turnTimings = readTimings();
@@ -61,7 +62,7 @@ const pendingApprovals = new Map<string, PendingApproval>();
 const failedTurns = new Set<string>();
 
 function saveTimings(): void {
-  try { localStorage.setItem("kitty.turnTimings", JSON.stringify(turnTimings)); } catch { /* Storage may be unavailable. */ }
+  try { localStorage.setItem("pantheon.turnTimings", JSON.stringify(turnTimings)); } catch { /* Storage may be unavailable. */ }
 }
 
 export type { ApprovalKind } from "../ipc/bindings";
@@ -105,7 +106,7 @@ export interface ChatState {
    * is what a quota actually is: an account-level fact that every session with
    * the same vendor shares. Holding one list and clearing it on every switch
    * meant opening an old chat blanked the meters until the next turn refilled
-   * them -- the numbers had not changed, kitty had just thrown them away.
+   * them -- the numbers had not changed, pantheon had just thrown them away.
    *
    * Still per vendor, though. Showing Claude's numbers in a Codex session
    * would be worse than showing none.
@@ -213,7 +214,7 @@ function updateActivityFields(): boolean {
     savedUnreadActivity = unread;
     // This is a disposable read receipt, like scroll position and turn timing;
     // session outcomes remain authoritative in Rust.
-    try { localStorage.setItem("kitty.projectUnread", unread); } catch { /* Storage may be unavailable. */ }
+    try { localStorage.setItem("pantheon.projectUnread", unread); } catch { /* Storage may be unavailable. */ }
   }
   if (JSON.stringify(projectActivity) === JSON.stringify(state.projectActivity)
     && JSON.stringify(running) === JSON.stringify(state.running)) return false;
@@ -272,7 +273,7 @@ export async function chooseProject(): Promise<boolean> {
     // this a folder you just opened is not in the list of folders.
     await refreshProjects();
     await useProject(project, true);
-    if (!created) showNotice({ tone: "info", message: `${project.name} is already in Kitty, so it was opened.` });
+    if (!created) showNotice({ tone: "info", message: `${project.name} is already in Pantheon, so it was opened.` });
     return true;
   } catch (error) {
     showNotice({ tone: "error", message: `Couldn't open that folder. ${message(error)}`, action: { label: "Try again", run: () => void chooseProject() } });
@@ -311,7 +312,7 @@ export async function forgetProject(projectId: string): Promise<boolean> {
   }
 }
 
-/** Renames a project in Kitty, showing the new name at once. */
+/** Renames a project in Pantheon, showing the new name at once. */
 export async function renameProject(projectId: string, name: string): Promise<boolean> {
   const before = projectSnapshot().projects.find(project => project.id === projectId)?.name;
   patchProject(projectId, project => ({ ...project, name }));
@@ -409,7 +410,7 @@ export async function archiveChat(projectId: string, sessionId: string, archived
   }
 }
 
-/** Opens a project kitty already knows about, with or without a folder. */
+/** Opens a project pantheon already knows about, with or without a folder. */
 export async function openById(projectId: string): Promise<void> {
   try {
     await useProject(await ipc.openStoredProject(projectId));
@@ -641,7 +642,7 @@ export function newSession(): void {
 }
 
 /**
- * Permanently deletes one chat from Kitty.
+ * Permanently deletes one chat from Pantheon.
  *
  * If it was the one on screen, its neighbour takes its place -- or a fresh
  * draft, rather than a transcript that is no longer anywhere. Returns the
@@ -715,7 +716,7 @@ export async function restartAgentContext(): Promise<void> {
   try {
     await ipc.restartSessionThread(sessionId);
     if (state.activeId === sessionId) {
-      set({ loading: false, notice: "Fresh agent context ready. Saved Kitty history remains; send your next request." });
+      set({ loading: false, notice: "Fresh agent context ready. Saved Pantheon history remains; send your next request." });
     }
   } catch (error) {
     if (state.activeId === sessionId) set({ loading: false, error: message(error) });

@@ -9,6 +9,11 @@ on:
         description: 'Existing stable version tag, e.g. v0.1.1'
         required: true
         type: string
+      verify_only:
+        description: 'Verify signed assets already uploaded to an existing draft'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -19,9 +24,11 @@ concurrency:
 
 jobs:
   windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.verify_only }}
     runs-on: windows-latest
     env:
       RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,22 +44,19 @@ jobs:
       - run: npm ci
       - name: Verify version and release configuration
         run: node scripts/check-release.mjs $env:RELEASE_TAG
-      - name: Require signing key
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          if (!$env:TAURI_SIGNING_PRIVATE_KEY) { throw 'Configure the TAURI_SIGNING_PRIVATE_KEY repository secret before releasing.' }
       - run: npm run check
       - run: npm run test:updates
       - run: npm run test:activity
       - run: npm run test:workspace
       - run: npm run test:dictation
+      - run: npm run test:branding
       - name: Prepare verified bundled dictation resources
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-dictation-pack.ps1
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
       - name: Build and upload signed installer and update feed
+        if: env.HAS_SIGNING_KEY == 'true'
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -60,7 +64,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ env.RELEASE_TAG }}
-          releaseName: 'Kitty v__VERSION__'
+          releaseName: 'Pantheon v__VERSION__'
           releaseBody: |
             Download the Windows x64 -setup.exe for a first installation.
             Existing updater-enabled installations can use Settings > Updates.
@@ -72,6 +76,7 @@ jobs:
           updaterJsonPreferNsis: true
           args: --ci --bundles nsis -- --locked
       - name: Verify uploaded update feed before publishing
+        if: env.HAS_SIGNING_KEY == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -80,4 +85,60 @@ jobs:
           node scripts/check-release.mjs $env:RELEASE_TAG target/release-feed/latest.json
           if ($LASTEXITCODE -ne 0) { throw 'Invalid release manifest' }
           $installer = Get-ChildItem target/release/bundle/nsis -Filter ("*_" + $env:RELEASE_TAG.Substring(1) + "_x64-setup.exe") | Select-Object -First 1
-          cargo run -p kitty --example verify_update --locked -- $installer.FullName
+          cargo run -p pantheon --example verify_update --locked -- $installer.FullName
+      - name: Build installer for local signing
+        if: env.HAS_SIGNING_KEY != 'true'
+        run: |
+          '{"bundle":{"createUpdaterArtifacts":false}}' | Set-Content target/local-signing.json
+          npm run bundle -- --ci --config (Resolve-Path target/local-signing.json).Path -- --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
+      - name: Installed rebrand upgrade smoke on disposable runner
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download v0.2.4 --repo $env:GITHUB_REPOSITORY --pattern '*_x64-setup.exe' --pattern '*.exe.sig' --dir target/prior-release
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download previous signed release' }
+          $previous = Get-ChildItem target/prior-release -Filter '*_x64-setup.exe' | Select-Object -First 1
+          cargo run -p pantheon --example verify_update --locked -- $previous.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Previous installer signature is invalid' }
+          $installer = Get-ChildItem target/release/bundle/nsis -Filter ("*_" + $env:RELEASE_TAG.Substring(1) + "_x64-setup.exe") | Select-Object -First 1
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/installed-rebrand-smoke.ps1 -PreviousInstaller $previous.FullName -NewInstaller $installer.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Installed upgrade smoke failed' }
+      - name: Upload verified installer for local signing
+        if: env.HAS_SIGNING_KEY != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pantheon-${{ env.RELEASE_TAG }}-windows
+          path: target/release/bundle/nsis/*_x64-setup.exe
+          if-no-files-found: error
+
+  verify:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.verify_only }}
+    runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - name: Download signed draft assets
+        run: |
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --pattern '*_x64-setup.exe' --pattern '*.exe.sig' --pattern 'latest.json' --dir target/release/bundle/nsis
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download draft release assets' }
+          node scripts/check-release.mjs $env:RELEASE_TAG target/release/bundle/nsis/latest.json
+          if ($LASTEXITCODE -ne 0) { throw 'Invalid signed release feed' }
+      - name: Prepare native verifier resources
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-dictation-pack.ps1
+      - name: Verify signature and tamper rejection before publication
+        run: |
+          $installer = Get-ChildItem target/release/bundle/nsis -Filter ("*_" + $env:RELEASE_TAG.Substring(1) + "_x64-setup.exe") | Select-Object -First 1
+          cargo run -p pantheon --example verify_update --locked -- $installer.FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Installer signature verification failed' }

@@ -24,7 +24,7 @@ import type {
 } from "./bindings";
 
 /** The event the host emits for every session. */
-const TRANSCRIPT_EVENT = "kitty://transcript";
+const TRANSCRIPT_EVENT = "pantheon://transcript";
 
 // --------------------------------------------------------------- dictation
 
@@ -120,7 +120,7 @@ export function pickImage(): Promise<string | null> {
 /**
  * Adopts an image as the background, returning it as a data URL.
  *
- * The file is copied into kitty's own folder, so moving or deleting the
+ * The file is copied into pantheon's own folder, so moving or deleting the
  * original afterwards does not take the background with it.
  */
 export function setBackground(path: string): Promise<string> {
@@ -146,7 +146,7 @@ export function openProject(path: string): Promise<OpenedProject> {
   return invoke<OpenedProject>("open_project", { path });
 }
 
-/** Renames a project in Kitty. The folder on disk keeps its name. */
+/** Renames a project in Pantheon. The folder on disk keeps its name. */
 export function renameProject(projectId: string, name: string): Promise<Project> {
   return invoke<Project>("rename_project", { projectId, name });
 }
@@ -264,7 +264,7 @@ export function deleteSession(sessionId: string): Promise<void> {
   return invoke<void>("delete_session", { sessionId });
 }
 
-/** Renames a chat. Kitty's title only; the provider is not told. */
+/** Renames a chat. Pantheon's title only; the provider is not told. */
 export function renameSession(sessionId: string, title: string): Promise<SessionRow> {
   return invoke<SessionRow>("rename_session", { sessionId, title });
 }
@@ -283,7 +283,7 @@ export function startSession(sessionId: string): Promise<void> {
   return invoke<void>("start_session", { sessionId });
 }
 
-/** Keeps Kitty history but opens new provider context without replaying work. */
+/** Keeps Pantheon history but opens new provider context without replaying work. */
 export function restartSessionThread(sessionId: string): Promise<void> {
   return invoke<void>("restart_session_thread", { sessionId });
 }
@@ -301,9 +301,9 @@ export function sendTurn(sessionId: string, text: string, attachments: string[] 
   return invoke<number>("send_turn", { sessionId, text, attachments });
 }
 
-/** A file attached to a message: kitty's own checked copy of it. */
+/** A file attached to a message: pantheon's own checked copy of it. */
 export interface Attachment {
-  /** Kitty's copy, which is what is sent and shown. */
+  /** Pantheon's copy, which is what is sent and shown. */
   path: string;
   /** The original file name. */
   name: string;
@@ -351,7 +351,7 @@ export interface SessionTitle {
 }
 
 export function onSessionTitle(handler: (update: SessionTitle) => void): Promise<UnlistenFn> {
-  return listen<SessionTitle>("kitty://session-title", (event) => handler(event.payload));
+  return listen<SessionTitle>("pantheon://session-title", (event) => handler(event.payload));
 }
 /**
  * Subscribes to transcript batches.

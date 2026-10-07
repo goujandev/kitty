@@ -1,7 +1,7 @@
 //! Models a harness says it can run.
 //!
 //! Always discovered, never hardcoded. Whatever the CLI reports for the user's
-//! subscription is the truth, and it stays current without kitty shipping a
+//! subscription is the truth, and it stays current without pantheon shipping a
 //! release (`MODEL-CATALOG.md`).
 
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use crate::HarnessId;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
-    /// What kitty passes back to the CLI to select this model.
+    /// What pantheon passes back to the CLI to select this model.
     ///
     /// Claude accepts aliases like `sonnet` alongside full names, and resolves
     /// them itself; storing what it gave us avoids guessing which form it

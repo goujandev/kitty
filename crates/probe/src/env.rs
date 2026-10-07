@@ -1,7 +1,7 @@
 //! A snapshot of the environment we search for CLIs in.
 //!
 //! Windows hands a GUI process the environment that existed when it launched.
-//! Install a CLI while kitty is running and it stays invisible until something
+//! Install a CLI while pantheon is running and it stays invisible until something
 //! re-reads the environment. Rather than telling the user to restart the app,
 //! we re-read the authoritative source, which is the registry, and merge it
 //! with the process environment (ADR-0004).

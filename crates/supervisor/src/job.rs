@@ -1,4 +1,4 @@
-//! Windows job objects: the one mechanism kitty uses to kill a process tree.
+//! Windows job objects: the one mechanism pantheon uses to kill a process tree.
 //!
 //! An agent CLI is rarely one process. `claude` is an npm shim that launches
 //! Node, which spawns its own children. Killing the process we started leaves
@@ -111,13 +111,13 @@ impl Job {
 impl Drop for Job {
     fn drop(&mut self) {
         // Closing the last handle triggers KILL_ON_JOB_CLOSE, so this is what
-        // guarantees no orphans even if kitty panics on the way out.
+        // guarantees no orphans even if pantheon panics on the way out.
         // SAFETY: the handle is live and owned exclusively by this struct.
         unsafe { windows_sys::Win32::Foundation::CloseHandle(self.handle) };
     }
 }
 
-// kitty targets Windows (ADR-0001). These exist so the crate still type-checks
+// pantheon targets Windows (ADR-0001). These exist so the crate still type-checks
 // elsewhere, and they do not pretend to contain anything.
 #[cfg(not(windows))]
 impl Job {

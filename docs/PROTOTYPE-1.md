@@ -9,7 +9,7 @@ The four things requested, plus the minimum needed to prove they work.
 3. **Every Anthropic and OpenAI model**, discovered live from the CLIs, with
    per-model settings such as reasoning effort, plus a custom model id field.
 4. **Subscription only.** No API keys. If `claude` and `codex` are logged in,
-   kitty works.
+   pantheon works.
 5. **A working chat session**: send a turn, stream the reply, render tool
    activity, answer approval prompts, cancel, and have it survive a restart.
 
@@ -38,9 +38,9 @@ harness is the test of ADR-0002.
 Each slice ends in something you can run and judge. There is no scaffold-only
 milestone; the scaffolding is absorbed into the first slice that needs it.
 
-### S1 — kitty sees your agents
+### S1 — pantheon sees your agents
 
-**What you can do:** launch kitty and see Claude Code and Codex listed, each
+**What you can do:** launch pantheon and see Claude Code and Codex listed, each
 with its install path, version, and whether it is logged in. A rescan button
 picks up a CLI you installed a minute ago. A CLI that is missing, logged out,
 or too old says which, and shows the exact command that fixes it.
@@ -56,12 +56,12 @@ the whole premise of the product, that subscription auth costs us nothing.
 **Status: built.** Verified on the development machine against Claude Code
 2.1.270 and Codex 0.153.4, both signed in. The signed-out path was verified by
 pointing `CLAUDE_CONFIG_DIR` at an empty directory. The same scan runs headless
-via `cargo run -p kitty-probe --example probe`.
+via `cargo run -p pantheon-probe --example probe`.
 
 ### S2 — a reply streams in, and it is still there tomorrow
 
 **What you can do:** pick a folder, type a message, watch a reply stream in
-from either CLI. Close kitty, reopen it, and the conversation is exactly as you
+from either CLI. Close pantheon, reopen it, and the conversation is exactly as you
 left it.
 
 **What gets built:** the supervisor, meaning spawn with job objects, byte
@@ -85,8 +85,8 @@ follow-up turn resumes the same vendor session.
 Headless, the same path runs without the GUI:
 
 ```
-cargo run -p kitty-engine --example chat -- claude "Say hello in three words."
-cargo run -p kitty-engine --example chat -- codex  "Say hello in three words."
+cargo run -p pantheon-engine --example chat -- claude "Say hello in three words."
+cargo run -p pantheon-engine --example chat -- codex  "Say hello in three words."
 ```
 
 ### S3 — real work happens
@@ -176,7 +176,7 @@ to organize. S2 already lets you pick a folder, which is all a session needs.
    survive, with a regression test per harness. This is the defect class behind
    MonoCode issues #218 and #219, and it is an acceptance criterion rather than
    a bug to fix later.
-6. Closing and reopening kitty restores the conversation in full.
+6. Closing and reopening pantheon restores the conversation in full.
 7. Killing the process mid-stream loses at most the last batch.
 8. Both codecs replay their fixtures identically, and the engine's state machine
    has table-driven tests with no real process.
@@ -185,7 +185,7 @@ to organize. S2 already lets you pick a folder, which is all a session needs.
 9. An approval prompt appears, the answer reaches the CLI, and the tool
    proceeds, on both harnesses.
 10. Cancelling mid-turn stops the turn in-band and leaves a valid transcript.
-11. Closing kitty leaves no orphaned CLI processes, verified with a CLI whose
+11. Closing pantheon leaves no orphaned CLI processes, verified with a CLI whose
     startup script spawns a grandchild, and no console window ever flashes when
     a child starts.
 
@@ -195,7 +195,7 @@ to organize. S2 already lets you pick a folder, which is all a session needs.
     typed and used.
 
 **S5**
-13. Opening a folder, running a session, closing kitty and reopening restores
+13. Opening a folder, running a session, closing pantheon and reopening restores
     the project, the session and its transcript.
 
 ---

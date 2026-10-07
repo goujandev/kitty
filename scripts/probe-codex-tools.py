@@ -23,7 +23,7 @@ TIMEOUT_S = 240
 
 def main() -> int:
     prompt = sys.argv[1] if len(sys.argv) > 1 else (
-        "Create a file called kitty-probe-scratch.txt containing the single word: ok. "
+        "Create a file called pantheon-probe-scratch.txt containing the single word: ok. "
         "Then stop."
     )
 
@@ -108,7 +108,7 @@ def main() -> int:
         raise SystemExit(f"timed out waiting for {method}")
 
     request("initialize", {
-        "clientInfo": {"name": "kitty", "title": "kitty", "version": "0.1.0"},
+        "clientInfo": {"name": "pantheon", "title": "Pantheon", "version": "0.1.0"},
         "capabilities": {"experimentalApi": True},
     })
     send({"method": "initialized"})
@@ -131,7 +131,7 @@ def main() -> int:
     done.wait(TIMEOUT_S)
     time.sleep(0.5)
     proc.kill()
-    (ROOT / "kitty-probe-scratch.txt").unlink(missing_ok=True)
+    (ROOT / "pantheon-probe-scratch.txt").unlink(missing_ok=True)
 
     FIXTURE.parent.mkdir(parents=True, exist_ok=True)
     with FIXTURE.open("w", encoding="utf-8") as fh:

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Kitty",
-  "version": "0.2.4",
+  "productName": "Pantheon",
+  "version": "0.2.5",
   "identifier": "dev.kitty.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Kitty",
+        "title": "Pantheon",
         "width": 1040,
         "height": 760,
         "minWidth": 560,
@@ -25,7 +25,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://kitty.localhost; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: http://pantheon.localhost; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {
@@ -39,7 +39,7 @@
       "../docs/licenses/VC-Runtime-NOTICE.txt": "VC-Runtime-NOTICE.txt"
     },
     "publisher": "goujandev",
-    "shortDescription": "A desktop workspace for your coding agents.",
+    "shortDescription": "Your personal hub for AI coding agents.",
     "targets": [
       "nsis"
     ],
@@ -52,6 +52,7 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
+        "template": "windows/installer.nsi",
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico"
       },

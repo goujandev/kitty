@@ -1,8 +1,8 @@
 //! End-to-end proof that a reply streams in.
 //!
 //! ```text
-//! cargo run -p kitty-engine --example chat -- claude "Say hello in three words."
-//! cargo run -p kitty-engine --example chat -- codex  "Say hello in three words."
+//! cargo run -p pantheon-engine --example chat -- claude "Say hello in three words."
+//! cargo run -p pantheon-engine --example chat -- codex  "Say hello in three words."
 //! ```
 //!
 //! Finds the CLI, starts a session, sends one turn, and prints the reply as it
@@ -12,8 +12,8 @@
 use std::io::Write;
 use std::time::{Duration, Instant};
 
-use kitty_core::{HarnessId, InstallState, SessionEvent};
-use kitty_engine::{Session, SessionSpec};
+use pantheon_core::{HarnessId, InstallState, SessionEvent};
+use pantheon_engine::{Session, SessionSpec};
 
 fn main() -> std::process::ExitCode {
     let mut args = std::env::args().skip(1);
@@ -32,8 +32,8 @@ fn main() -> std::process::ExitCode {
         .next()
         .unwrap_or_else(|| "Say hello in exactly three words.".to_owned());
 
-    let env = kitty_probe::EnvSnapshot::capture();
-    let status = kitty_probe::probe_one(harness, &env);
+    let env = pantheon_probe::EnvSnapshot::capture();
+    let status = pantheon_probe::probe_one(harness, &env);
     let InstallState::Found { path, version } = &status.install else {
         eprintln!("{} is not usable: {:?}", status.label, status.install);
         if let Some(hint) = &status.hint {
@@ -158,10 +158,10 @@ fn stream_turn(
 
             SessionEvent::ToolEnded { status, detail, .. } => {
                 let mark = match status {
-                    kitty_core::ToolStatus::Ok => "done",
-                    kitty_core::ToolStatus::Failed => "failed",
-                    kitty_core::ToolStatus::Denied => "denied",
-                    kitty_core::ToolStatus::Running => "running",
+                    pantheon_core::ToolStatus::Ok => "done",
+                    pantheon_core::ToolStatus::Failed => "failed",
+                    pantheon_core::ToolStatus::Denied => "denied",
+                    pantheon_core::ToolStatus::Running => "running",
                 };
                 eprintln!(
                     "    {mark}{}",
@@ -187,7 +187,7 @@ fn stream_turn(
     std::process::ExitCode::FAILURE
 }
 
-fn print_usage(usage: &kitty_core::Usage) {
+fn print_usage(usage: &pantheon_core::Usage) {
     eprintln!(
         "\n\ntokens  in {} out {} cache-read {}",
         usage.input_tokens, usage.output_tokens, usage.cache_read_tokens
@@ -200,7 +200,7 @@ fn print_context(used: Option<u64>, window: Option<u64>) {
     }
 }
 
-fn print_limits(windows: &[kitty_core::RateLimitWindow]) {
+fn print_limits(windows: &[pantheon_core::RateLimitWindow]) {
     for w in windows {
         eprintln!("limit   {} at {:.0}%", w.label, w.utilization * 100.0);
     }
