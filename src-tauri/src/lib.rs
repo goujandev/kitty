@@ -403,7 +403,7 @@ const CATALOG_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 ///
 /// The CLI version already stamps the cache from the other direction. This is
 /// the same idea pointed at ourselves.
-const CATALOG_FORMAT: u32 = 2;
+const CATALOG_FORMAT: u32 = 3;
 
 fn catalog_key(harness: HarnessId) -> String {
     format!("catalog:{CATALOG_FORMAT}:{harness}")

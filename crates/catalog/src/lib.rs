@@ -259,11 +259,27 @@ fn claude_model(raw: &Value) -> Option<ModelInfo> {
 /// `claude-fable-5-1` -- the bracket in the id is not a promise about context
 /// -- so parsing it produced a label claiming a 1M window the model does not
 /// have. The CLI knows; kitty should not be guessing.
+///
+/// Newer Claude Code versions moved the full name into `displayName`
+/// ("Opus 5.5", "Fable 5.1") and left `description` as the sales line alone,
+/// so reading the description's first half named every model after its blurb
+/// ("Best for everyday, complex tasks"). Both shapes are handled: a
+/// `displayName` with a version in it is the name; otherwise the name before
+/// the separator, when there is one; otherwise `displayName` as given.
 fn claude_label(raw: &Value, display_name: &str) -> String {
+    // A version is a word of digits and dots: "5.5" in "Opus 5.5", but not
+    // the "1M" in "Opus (1M context)", which is a family name.
+    let versioned = display_name.split_whitespace().any(|word| {
+        word.starts_with(|c: char| c.is_ascii_digit())
+            && word.chars().all(|c| c.is_ascii_digit() || c == '.')
+    });
+    if versioned {
+        return display_name.to_owned();
+    }
     raw.get("description")
         .and_then(Value::as_str)
-        .and_then(|text| text.split(SEPARATOR).next())
-        .map(str::trim)
+        .and_then(|text| text.split_once(SEPARATOR))
+        .map(|(name, _)| name.trim())
         .filter(|name| !name.is_empty())
         .map_or_else(|| display_name.to_owned(), str::to_owned)
 }
@@ -444,6 +460,38 @@ mod tests {
             ),
         ];
 
+        for (raw, expected) in cases {
+            let given = raw
+                .get("displayName")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            assert_eq!(super::claude_label(&raw, given), expected);
+        }
+    }
+
+    /// What Claude Code returns as of 2026-10-07, verbatim: the full name in
+    /// `displayName` and only the blurb in `description`, except for the
+    /// "Default" entry, which still names its model in the description.
+    #[test]
+    fn a_claude_label_is_the_display_name_when_it_carries_the_version() {
+        let cases = [
+            (
+                json!({ "value": "opus", "displayName": "Opus 5.5", "description": "Best for everyday, complex tasks" }),
+                "Opus 5.5",
+            ),
+            (
+                json!({ "value": "fable", "displayName": "Fable 5.1", "description": "Most capable for your hardest and longest-running tasks" }),
+                "Fable 5.1",
+            ),
+            (
+                json!({ "value": "haiku", "displayName": "Haiku 4.5", "description": "Fastest for quick answers" }),
+                "Haiku 4.5",
+            ),
+            (
+                json!({ "value": "default", "displayName": "Default (recommended)", "description": "Opus 5.5 \u{b7} Best for everyday, complex tasks" }),
+                "Opus 5.5",
+            ),
+        ];
         for (raw, expected) in cases {
             let given = raw
                 .get("displayName")
