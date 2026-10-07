@@ -1,0 +1,17 @@
+Microsoft Visual C++ Runtime
+Copyright Microsoft Corporation. All rights reserved.
+
+Kitty distributes unmodified Microsoft Visual C++ release x64 runtime files
+from the licensed Visual Studio Build Tools installation's VC/Redist folder:
+msvcp140.dll, msvcp140_1.dll, vcruntime140.dll, vcruntime140_1.dll.
+These proprietary redistributable components support the ONNX speech engine.
+They are not covered by Kitty's or Handy's open-source licences.
+
+Visual Studio Build Tools licence terms:
+https://visualstudio.microsoft.com/license-terms/vs2022-ga-diagnosticbuildtools/
+Microsoft's list of distributable Visual Studio 2022 components:
+https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution
+
+The build script validates the architecture and Microsoft signature of each
+file and preserves the original binaries. The installer places them beside
+Kitty.exe, so a separate Visual C++ runtime installation is unnecessary.

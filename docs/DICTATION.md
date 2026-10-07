@@ -1,6 +1,6 @@
 # Local dictation
 
-Kitty v0.2.2 includes dictation using Handy's local recognition stack and Kitty's
+Kitty v0.2.3 includes dictation using Handy's local recognition stack and Kitty's
 own composer interaction. The user selected and tested the prototype direction,
 then authorized release with the model/runtime included in the installer.
 
@@ -46,13 +46,18 @@ the 80 displayed samples now cover six seconds. Polling/capture stays responsive
 
 The engine is Handy's `transcribe-rs` 0.3.8 ONNX path with English Moonshine V2
 Small. This native dependency requires Rust 1.88 or later to build Kitty;
-the CI stable toolchain already satisfies it. The speech pack is downloaded
-separately on first use, including the
+the CI stable toolchain already satisfies it. The build prepares the speech pack,
+including the
 model (104,842,676-byte source archive) and Microsoft's CPU ONNX Runtime
 (74,075,355-byte source archive). The build script verifies their SHA256 pins,
 extracts only allowlisted files and bundles 179,217,486 bytes of model/runtime
 resources and licensing notices. Generated files are ignored and never committed.
 `tauri.conf.json` maps `resources/dictation/` to the installed `dictation/` folder.
+The installer also includes four unmodified, signed Microsoft Visual C++ x64
+runtime DLLs from Visual Studio's release redistributables. These are installed
+beside Kitty.exe for dependency resolution; no separate VC++ installation is
+needed. The preparation script checks their Microsoft signatures and x64 PE
+architecture. Their redistribution notice is included in the app directory.
 On first use, Rust stages this pack into app-data using cancellable copies and
 publishes readiness only after all files are present. Complete installed/cached
 packs skip network setup entirely. Unbundled development builds retain the
@@ -116,6 +121,6 @@ A fresh bundled-pack cache also passed real fixture recognition without network
 downloads: 35.33 seconds of audio recognized in 11.88 seconds including cold model
 loading. Native tests cover offline provisioning, incomplete resources, cancellation
 and retained licensing notices. Combined TypeScript/frontend tests, native workspace
-tests, formatting and strict Clippy passed for v0.2.2. Default microphone, user
+tests, formatting and strict Clippy passed for the bundled release. Default microphone, user
 voice/accent and subjective accuracy remain for personal testing; the disposable
 Windows account two-version installed-update smoke is not available here.

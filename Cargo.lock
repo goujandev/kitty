@@ -2294,7 +2294,7 @@ dependencies = [
 
 [[package]]
 name = "kitty"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "base64 0.22.1",
  "cpal",
@@ -2327,7 +2327,7 @@ dependencies = [
 
 [[package]]
 name = "kitty-catalog"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "kitty-core",
  "kitty-harness",
@@ -2338,7 +2338,7 @@ dependencies = [
 
 [[package]]
 name = "kitty-core"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -2346,7 +2346,7 @@ dependencies = [
 
 [[package]]
 name = "kitty-engine"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "kitty-core",
  "kitty-harness",
@@ -2358,7 +2358,7 @@ dependencies = [
 
 [[package]]
 name = "kitty-harness"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "kitty-core",
  "serde",
@@ -2367,7 +2367,7 @@ dependencies = [
 
 [[package]]
 name = "kitty-probe"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "base64 0.22.1",
  "kitty-core",
@@ -2379,7 +2379,7 @@ dependencies = [
 
 [[package]]
 name = "kitty-store"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "kitty-core",
  "rusqlite",
@@ -2390,7 +2390,7 @@ dependencies = [
 
 [[package]]
 name = "kitty-supervisor"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "kitty-core",
  "tempfile",

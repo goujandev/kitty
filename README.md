@@ -76,7 +76,7 @@ finished text into the message box for editing, or press Send while recording
 to finish transcription and send directly. The X beside the waveform or Escape discards the
 recording and keeps your original draft. Changing chats also cancels dictation.
 
-The Windows installer includes the speech model and runtime. First use prepares
+The Windows installer includes the speech model and its required runtimes. First use prepares
 these installed files locally; dictation requires no separate download, account
 or API key. Kitty uses Handy's English Moonshine Small recognition stack, with
 no LLM cleanup, and supports English recordings up to two minutes.

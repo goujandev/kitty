@@ -24,13 +24,18 @@ Users of versions without the updater manually install v0.1.1 once. Subsequent r
 
 ## Local build
 
-As of v0.2.2, the installer includes local dictation's pinned speech model and CPU
+As of v0.2.3, the installer includes local dictation's pinned speech model and CPU
 runtime. The Tauri pre-build command runs `scripts/prepare-dictation-pack.ps1`:
 it verifies archive hashes, stages allowlisted resources plus licences, and
 reuses cached downloads under `target/dictation-pack-downloads`. Generated
 `src-tauri/resources/dictation` files stay out of Git. A fresh build machine needs
 network access for preparation; installed dictation works without a first-use
 download. All release checks must use this same resource configuration.
+The script also finds the installed Visual Studio release x64 redistributables,
+validates the four required VC++ DLLs' Microsoft signatures and architecture,
+and stages them in ignored `src-tauri/resources/vc-runtime`. Tauri installs these
+beside Kitty.exe, with their redistribution notice. Build machines need the C++
+redistributable component; end users need no separate VC++ installation.
 
 On the machine holding the key, in PowerShell:
 

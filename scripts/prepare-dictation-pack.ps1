@@ -4,9 +4,11 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 # Tauri's child shell can inherit another PowerShell edition's module path.
 # Resolve the utility module from this running edition for hash/network/zip tools.
 Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1') -ErrorAction Stop
+Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Security/Microsoft.PowerShell.Security.psd1') -ErrorAction Stop
 $workspace = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $source = [IO.File]::ReadAllText((Join-Path $workspace 'src-tauri/src/dictation.rs'))
 
@@ -163,3 +165,68 @@ try {
     $size = (Get-ChildItem -LiteralPath $target -Recurse -File | Measure-Object Length -Sum).Sum
     Write-Host "Verified bundled dictation pack: $($files.Count) files, $size bytes."
 } finally { Remove-Generated $stage }
+
+# ONNX Runtime imports these release x64 CRT libraries. Ship the redistributable
+# copies supplied by Visual Studio, so a clean Windows account needs no VC setup.
+$crtNames = @('msvcp140.dll', 'msvcp140_1.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')
+$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+if (!(Test-Path -LiteralPath $vswhere)) { throw 'Bundling dictation requires Visual Studio C++ redistributables (vswhere was not found).' }
+$installations = @(& $vswhere -all -products '*' -property installationPath)
+if ($LASTEXITCODE -ne 0) { throw 'Could not discover Visual Studio C++ redistributables.' }
+$candidates = @(foreach ($installation in $installations) {
+    $redist = Join-Path $installation 'VC/Redist/MSVC'
+    if (!(Test-Path -LiteralPath $redist)) { continue }
+    foreach ($version in Get-ChildItem -LiteralPath $redist -Directory) {
+        if ($version.Name -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { continue }
+        $x64 = Join-Path $version.FullName 'x64'
+        if (!(Test-Path -LiteralPath $x64)) { continue }
+        foreach ($crt in Get-ChildItem -LiteralPath $x64 -Directory -Filter 'Microsoft.VC*.CRT') {
+            if (@($crtNames | Where-Object { !(Test-Path -LiteralPath (Join-Path $crt.FullName $_) -PathType Leaf) }).Count -eq 0) {
+                [pscustomobject]@{ Version = [version]$version.Name; Directory = $crt.FullName }
+            }
+        }
+    }
+})
+$selected = $candidates | Sort-Object Version -Descending | Select-Object -First 1
+if (!$selected) { throw 'Install the Visual Studio C++ x64 release redistributables: all four ONNX Runtime CRT dependencies are required.' }
+$crtTarget = Assert-WorkspacePath (Join-Path $resources 'vc-runtime')
+$crtStage = Assert-WorkspacePath (Join-Path $resources ('.vc-runtime-staging-' + [guid]::NewGuid().ToString('N')))
+$crtBackup = Assert-WorkspacePath (Join-Path $resources ('.vc-runtime-backup-' + [guid]::NewGuid().ToString('N')))
+New-Item -ItemType Directory -Path $crtStage | Out-Null
+try {
+    foreach ($name in $crtNames) {
+        $inputFile = Join-Path $selected.Directory $name
+        $signature = Get-AuthenticodeSignature -LiteralPath $inputFile
+        if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(^|,\s*)O=Microsoft Corporation(,|$)') {
+            throw "CRT dependency must carry a valid Microsoft Authenticode signature: $name"
+        }
+        $reader = [IO.BinaryReader]::new([IO.File]::OpenRead($inputFile))
+        try {
+            if ($reader.ReadUInt16() -ne 23117) { throw "Invalid CRT executable: $name" }
+            $reader.BaseStream.Position = 60
+            $header = $reader.ReadInt32()
+            if ($header -lt 64 -or $header -gt ($reader.BaseStream.Length - 6)) { throw "Invalid CRT PE header: $name" }
+            $reader.BaseStream.Position = $header
+            if ($reader.ReadUInt32() -ne 17744 -or $reader.ReadUInt16() -ne 34404) { throw "CRT dependency must be Windows x64: $name" }
+        } finally { $reader.Dispose() }
+        $destination = Join-Path $crtStage $name
+        Copy-Item -LiteralPath $inputFile -Destination $destination
+        if ((File-Hash $inputFile) -ne (File-Hash $destination)) { throw "CRT copy failed its integrity check: $name" }
+    }
+    $same = (Test-Path -LiteralPath $crtTarget) -and @(Get-ChildItem -LiteralPath $crtTarget -File).Count -eq $crtNames.Count
+    foreach ($name in $crtNames) {
+        $existing = Assert-WorkspacePath (Join-Path $crtTarget $name)
+        if (!(Test-Path -LiteralPath $existing) -or (File-Hash $existing) -ne (File-Hash (Join-Path $crtStage $name))) { $same = $false; break }
+    }
+    if (!$same) {
+        if (Test-Path -LiteralPath $crtTarget) { Move-Item -LiteralPath (Assert-WorkspacePath $crtTarget) -Destination $crtBackup }
+        try { Move-Item -LiteralPath (Assert-WorkspacePath $crtStage) -Destination $crtTarget }
+        catch {
+            if (Test-Path -LiteralPath $crtBackup) { Move-Item -LiteralPath (Assert-WorkspacePath $crtBackup) -Destination $crtTarget }
+            throw
+        }
+        Remove-Generated $crtBackup
+    }
+    $crtSize = (Get-ChildItem -LiteralPath $crtTarget -File | Measure-Object Length -Sum).Sum
+    Write-Host "Verified bundled Microsoft x64 CRT $($selected.Version): $($crtNames.Count) files, $crtSize bytes."
+} finally { Remove-Generated $crtStage }
