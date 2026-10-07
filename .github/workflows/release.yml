@@ -118,6 +118,8 @@ jobs:
     env:
       RELEASE_TAG: ${{ inputs.tag }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CARGO_TERM_COLOR: always
+      RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v4
         with:
@@ -128,6 +130,9 @@ jobs:
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: check
+          save-if: false
       - run: npm ci
       - name: Download signed draft assets
         run: |
