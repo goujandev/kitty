@@ -11,6 +11,8 @@
     "tauri": "tauri",
     "start": "tauri dev",
     "bundle": "tauri build --bundles nsis",
+    "release:fast": "node scripts/release-fast.mjs",
+    "test:release-tools": "node --test scripts/release-artifact.test.mjs",
     "check:contract": "node scripts/check-contract.mjs",
     "test:updates": "node --test scripts/update-controller.test.mjs scripts/update-settings.test.mjs scripts/release.test.mjs",
     "test:activity": "node --test scripts/activity.test.mjs scripts/project-activity.test.mjs scripts/chat-lifecycle.test.mjs",

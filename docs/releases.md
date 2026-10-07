@@ -35,37 +35,74 @@ shortcut/icon; check this in an installed upgrade rather than assuming success.
 
 The remote repository and update endpoint remain the existing public release
 location. Do not rewrite their URLs until a remote rename/redirect is verified.
+The repository now resolves to `goujandev/pantheon` (verified via GitHub's API);
+release tooling uses that canonical identity. The existing `goujandev/kitty`
+download/feed URLs redirect correctly and remain stable for installed clients.
 The signing key keeps its real filename and public key. The rebrand alone is not
 a release: increment versions and complete the gates below before distribution.
+
+## Fast publication
+
+The Windows installer is built **before publication**, in the normal CI run for
+each push to `main`. CI keeps the existing TypeScript, contract, frontend tests,
+Rust formatting/lints/tests and generated-file checks, then packages a complete
+NSIS installer. It uploads `pantheon-windows-<source SHA>` with a receipt binding
+the installer filename, size and SHA-256 to the exact source, version, repository,
+public key and completed gates. Pull requests run checks without producing a
+publishable artifact. Publication requires the whole CI run to finish successfully.
+
+CI shares a `windows` Rust cache, including workspace crates, and caches pinned
+speech archives. Resource preparation and frontend building happen once; the
+packaging-only configuration disables the repeated Tauri pre-build hook and
+defers updater signing to the machine holding the existing key. It does not
+change the production public key, endpoint or bundled resources.
+
+For a release, prepare the next version **while implementing the change**, before
+pushing the source that CI builds. A finished artifact for a published version
+can be inspected but cannot be republished. A version bump after CI requires a
+new CI build because it changes the executable and installer bytes.
+
+When the exact source is ready and the user has requested publication, run:
+
+```powershell
+npm run release:fast -- --notes-file <release-notes-file>
+```
+
+The command selects a successful CI run for local `HEAD`, downloads only its
+release-ready artifact, checks its receipt and hash, signs locally, verifies
+the signature and tamper rejection against the committed public key, and
+publishes the installer, signature and matching `latest.json`. It does not
+rebuild, rerun tests or dispatch a native verifier workflow. A ready artifact
+removes native compilation from the publication wait; remaining time depends
+on artifact download and release upload speeds. It is not an instant-build
+promise for source that has not passed CI yet.
+
+Use `npm run release:fast -- --inspect` to check readiness without signing or
+publishing. Add `--run-id <successful-CI-run-id>` to select a particular run;
+the exact-source and version checks still apply. The optional **Release readiness**
+workflow does the same read-only inspection of current `main`. Tags do not start
+another build or publish automatically. Artifacts are retained for 14 days;
+missing or expired artifacts require a new successful CI run.
 
 ## One-time setup
 
 The signing key is at C:\Users\gouja\.tauri\kitty-updater.key, outside the repository. Its matching public key is committed in src-tauri/tauri.conf.json. The generated key has an empty password. Back it up securely and retain it for every release; replacing the public key breaks updates for already-installed clients. Never commit the private key.
 
-In the [existing GitHub repository](https://github.com/goujandev/kitty), configure
-Settings > Secrets and variables > Actions:
+Keep the private key on its authorized machine. The fast path uses local signing
+and does not need a GitHub signing secret. Authenticate the GitHub CLI on that
+machine with access to Actions artifacts and release publication in the
+[existing repository](https://github.com/goujandev/kitty). Neither CI nor the
+readiness workflow can publish: their repository permissions are read-only.
 
-- TAURI_SIGNING_PRIVATE_KEY: the complete contents of kitty-updater.key.
-- TAURI_SIGNING_PRIVATE_KEY_PASSWORD: optional; leave unset for the generated key's empty password.
-
-The repository and release assets must be public: clients have no GitHub credentials. The workflow has contents: write permission via GITHUB_TOKEN. Updater signatures are separate from Windows Authenticode signing.
-
-If the repository has no signing secret, the Release workflow builds the installer
-on its disposable Windows runner and uploads it as an Actions artifact after the
-checks and installed rebrand smoke pass. Download that exact artifact and sign it
-locally with `npm run tauri -- signer sign --private-key-path <existing-key-path>`.
-Keep the private key on its authorized machine. Upload the installer, generated
-`.exe.sig` and matching `latest.json` to a draft. Dispatch Release with `verify_only`
-enabled to validate that draft's manifest, installer signature and tamper rejection
-against the committed public key, then publish it as latest after the run succeeds.
-No signing-secret upload is required for this path.
+The repository and release assets must be public: clients have no GitHub
+credentials. Updater signatures are separate from Windows Authenticode signing.
 
 ## Publishing
 
-1. Increase version consistently in package.json, package-lock.json (also packages[""].version), Cargo.toml workspace.package.version, and src-tauri/tauri.conf.json. Run cargo check to refresh Cargo.lock and commit it. Stable SemVer only.
-2. Commit and push a tag matching the version, starting with v0.1.1. The Release workflow builds Windows x64 and creates a draft release. The manual trigger accepts an existing tag for retrying a failed draft build.
-3. Confirm the draft contains the -setup.exe, its .exe.sig, and latest.json. The workflow checks the manifest version, versioned asset URL, windows-x86_64 entry, and embedded installer signature. It also cryptographically verifies the built installer against the app public key and confirms a modified installer is rejected. Do not rename generated assets.
-4. Complete the installed-app smoke test, then publish the draft as a normal release and mark it latest. Drafts and prereleases do not enter /releases/latest/download/latest.json. Every newer stable release must include its signed installer and manifest.
+1. Increase version consistently in package.json, package-lock.json (also packages[""].version), Cargo.toml workspace.package.version, and src-tauri/tauri.conf.json. Refresh the workspace package versions in Cargo.lock and commit them. Stable SemVer only; `node scripts/check-release.mjs v<version>` verifies consistency.
+2. Commit and push the prepared source to `main`. Let that one CI run complete checks, installer build and required installed smoke while development finishes. Do not create a release tag to start another build.
+3. Once publication is requested, use `npm run release:fast -- --notes-file <release-notes-file>`. The exact-source receipt, newer stable version, installer hash, signature and manifest gates must pass. Do not rename generated assets.
+4. The command publishes the versioned assets as a normal latest release. Drafts and prereleases do not enter /releases/latest/download/latest.json. Every newer stable release must include its signed installer and manifest. Interactive or hardware-dependent smoke requirements below remain applicable when their behavior changes.
 
 Users of versions without the updater manually install v0.1.1 once. Subsequent releases can be downloaded and installed under Settings > Updates. App-data identity is unchanged, retaining projects and saved conversations.
 
@@ -114,12 +151,20 @@ Use a disposable Windows account or VM and two increasing signed versions using 
 
 npm run test:updates checks Settings rendering and exercises the controller with simulated Tauri events: progress, duplicate requests, signature/download rejection, unknown lengths, restart gating, retries and release contracts. A signed installer build verifies native packaging. These tests do not replace the two-version installed Windows smoke test.
 
-The Release workflow also runs `scripts/installed-rebrand-smoke.ps1` on a guarded,
+CI runs `scripts/installed-rebrand-smoke.ps1` on a guarded,
 disposable GitHub-hosted Windows runner. It installs verified v0.2.4, launches its
 window, seeds synthetic history/appearance, performs the new installer `/UPDATE`,
 checks old/new executable and shortcut migration, runtime resources and branded
 startup, then verifies the original database and wallpaper. This covers installed
 rebrand continuity. Interactive updater download/restart controls, live providers,
 dictation hardware and existing taskbar pin caches remain separate manual checks.
+
+CI reruns the installed test for installer, configuration, branding resources,
+native startup/runtime, storage/schema/preferences, resource preparation or
+dependency changes. It can inherit coverage only when those paths are unchanged
+from the preceding push and that exact baseline has a successful CI run with an
+unexpired release-ready artifact. Missing baseline evidence runs the test again.
+The receipt records whether smoke ran or was inherited and the baseline SHA.
+All frontend and native gates still run on every CI source.
 
 References: https://v2.tauri.app/plugin/updater/ and https://github.com/tauri-apps/tauri-action.
