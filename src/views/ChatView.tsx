@@ -24,6 +24,7 @@ import { Transcript } from "./Transcript";
 import { ThreadDetails } from "./ThreadDetails";
 import { Icon } from "./Icon";
 import { Wallpaper } from "./Wallpaper";
+import { WorkingBar } from "./WorkingBar";
 import { ProjectMonogram } from "./ProjectMonogram";
 import { useProjects } from "../stores/projectStore";
 
@@ -79,8 +80,6 @@ export function ChatView({ detailsOpen, onCloseDetails, onSwitchProject }: { det
             harness={harness}
             agentName={attribution}
             timings={chat.timings}
-            status={chat.status}
-            waiting={chat.approval !== null}
           />
         )}
 
@@ -99,6 +98,13 @@ export function ChatView({ detailsOpen, onCloseDetails, onSwitchProject }: { det
             <span>This chat is archived. Sending a message restores it.</span>
             <button type="button" className="ws-link" onClick={() => void archiveChat(archived.projectId, archived.id, false)}>Restore</button>
           </p>}
+          {chat.busy && <WorkingBar
+            blocks={chat.blocks}
+            timings={chat.timings}
+            startedAt={chat.startedAt}
+            status={chat.status}
+            waiting={chat.approval !== null}
+          />}
           <Composer
             key={composerKey}
             storageKey={composerKey}
@@ -107,7 +113,7 @@ export function ChatView({ detailsOpen, onCloseDetails, onSwitchProject }: { det
             placeholder={cannotType}
             tools={<Tools />}
             context={<ContextRow onSwitchProject={onSwitchProject} />}
-            onSend={(text) => void send(text)}
+            onSend={(text, attachments) => void send(text, attachments)}
             onCancel={() => void cancel()}
           />
         </div>

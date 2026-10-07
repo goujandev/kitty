@@ -116,6 +116,48 @@ function pickImage(): Promise<string | null> {
   });
 }
 
+/** Files attached in the preview, by the path handed back for them. */
+const picked = new Map<string, { path: string; name: string; kind: "image" | "text"; size: number }>();
+
+/**
+ * The browser's own picker, standing in for the native one. Pictures come
+ * back as data URLs so the preview can draw them; the real host keeps a copy
+ * on disk instead and applies the same limits.
+ */
+function pickAttachments(): Promise<{ attached: unknown[]; refused: string[] }> {
+  return new Promise(resolve => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.accept = "image/png,image/jpeg,image/gif,image/webp,.txt,.md,.csv,.json,.ts,.tsx,.rs,.py,.log";
+    input.addEventListener("change", () => {
+      const files = [...input.files ?? []];
+      void Promise.all(files.map(file => new Promise<{ ok: boolean; reason?: string; value?: { path: string; name: string; kind: "image" | "text"; size: number } }>(done => {
+        const image = /^image\/(png|jpeg|gif|webp)$/.test(file.type);
+        if (image ? file.size > 5 * 1024 * 1024 : file.size > 256 * 1024) {
+          done({ ok: false, reason: `${file.name} is larger than ${image ? "5 MB, the limit for a picture" : "256 KB, the limit for a text document"}` });
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          const path = image ? String(reader.result) : `preview:${crypto.randomUUID()}/${file.name}`;
+          done({ ok: true, value: { path, name: file.name, kind: image ? "image" : "text", size: file.size } });
+        };
+        reader.onerror = () => done({ ok: false, reason: `${file.name} could not be read` });
+        if (image) reader.readAsDataURL(file); else reader.readAsText(file);
+      }))).then(results => {
+        for (const result of results) if (result.value) picked.set(result.value.path, result.value);
+        resolve({
+          attached: results.flatMap(result => result.value ? [result.value] : []),
+          refused: results.flatMap(result => result.reason ? [result.reason] : []),
+        });
+      });
+    });
+    input.addEventListener("cancel", () => resolve({ attached: [], refused: [] }));
+    input.click();
+  });
+}
+
 // -------------------------------------------------------------------- events
 
 const callbacks = new Map<number, Handler>();
@@ -130,25 +172,54 @@ function emit(sessionId: string, events: Row[]): void {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-/** A short, plausible reply, streamed the way the host batches one. */
-async function reply(sessionId: string, text: string): Promise<void> {
+/** Streams one message, word by word. */
+async function say(sessionId: string, kind: "assistant" | "reasoning", text: string): Promise<void> {
   const rows = blocks[sessionId]!;
-  const tool = rows.length;
-  await sleep(400);
-  rows.push(block(tool, "tool", "Search the project", JSON.stringify({ status: "running", detail: null })));
-  emit(sessionId, [{ kind: "blockAppended", seq: tool, blockKind: "tool", text: "Search the project" }]);
-  await sleep(700);
-  emit(sessionId, [{ kind: "toolStatusChanged", seq: tool, status: "ok", detail: "12 matches" }]);
   const seq = rows.length;
-  const answer = `This is the **preview**, so no agent is running. You said:\n\n> ${text.split("\n")[0]}\n\nIn the real app the reply streams in here, word by word.`;
-  rows.push(block(seq, "assistant", ""));
-  emit(sessionId, [{ kind: "blockAppended", seq, blockKind: "assistant", text: "" }]);
-  for (const word of answer.split(/(?<= )/)) {
+  rows.push(block(seq, kind, ""));
+  emit(sessionId, [{ kind: "blockAppended", seq, blockKind: kind, text: "" }]);
+  for (const word of text.split(/(?<= )/)) {
     await sleep(25);
     emit(sessionId, [{ kind: "blockDelta", seq, text: word }]);
   }
-  rows[seq] = { ...rows[seq], text: answer };
-  emit(sessionId, [{ kind: "blockFinal", seq, text: answer }, { kind: "turnEnded", stop: { kind: "endTurn" } }]);
+  rows[seq] = { ...rows[seq], text };
+  emit(sessionId, [{ kind: "blockFinal", seq, text }]);
+}
+
+/** Runs one tool row from start to finish. */
+async function step(sessionId: string, title: string, detail: string, ms: number): Promise<void> {
+  const rows = blocks[sessionId]!;
+  const seq = rows.length;
+  rows.push(block(seq, "tool", title, JSON.stringify({ status: "running", detail: null })));
+  emit(sessionId, [{ kind: "blockAppended", seq, blockKind: "tool", text: title }, { kind: "toolStatusChanged", seq, status: "running", detail: null }]);
+  await sleep(ms);
+  rows[seq] = { ...rows[seq], meta: JSON.stringify({ status: "ok", detail }) };
+  emit(sessionId, [{ kind: "toolStatusChanged", seq, status: "ok", detail }]);
+}
+
+/**
+ * A plausible turn, streamed the way the host batches one: an update, some
+ * thinking and steps, another update, more steps, then the answer. Mentioning
+ * "background" also has the agent pick the request up again by itself a
+ * moment after finishing, the way a background task reporting back does.
+ */
+async function reply(sessionId: string, text: string): Promise<void> {
+  emit(sessionId, [{ kind: "turnStarted" }]);
+  await sleep(400);
+  await say(sessionId, "assistant", "I'll look through the project first.");
+  await say(sessionId, "reasoning", "The request touches the transcript, so the grouping code is the place to start.");
+  await step(sessionId, "rg -n \"groupActivity\" src", "3 matches", 900);
+  await step(sessionId, "Read src/views/activity.ts", "55 lines", 700);
+  await say(sessionId, "assistant", "Found it. Running the checks now.");
+  await step(sessionId, "npm run test:activity", "17 passed", 1600);
+  await say(sessionId, "assistant", `This is the **preview**, so no agent is running. You said:\n\n> ${text.split("\n")[0]}\n\nIn the real app the reply streams in here, word by word.`);
+  emit(sessionId, [{ kind: "turnEnded", stop: { kind: "endTurn" } }]);
+  if (!/background/i.test(text)) return;
+  await sleep(2500);
+  emit(sessionId, [{ kind: "turnStarted" }]);
+  await step(sessionId, "Background task finished: npm run build", "built in 4.1s", 1200);
+  await say(sessionId, "assistant", "The background build finished too.");
+  emit(sessionId, [{ kind: "turnEnded", stop: { kind: "endTurn" } }]);
 }
 
 // ------------------------------------------------------------------ commands
@@ -206,6 +277,7 @@ async function command(cmd: string, args: Record<string, unknown>): Promise<unkn
     case "set_rail_widths": return null;
     case "background": return wallpaper();
     case "pick_image": return pickImage();
+    case "pick_attachments": return pickAttachments();
     case "set_background": try { localStorage.setItem(WALLPAPER_KEY, String(args.path)); } catch { /* Too large to keep. */ } return args.path;
     case "clear_background": try { localStorage.setItem(WALLPAPER_KEY, "none"); } catch { /* Storage may be unavailable. */ } return null;
     case "default_model": return settings.choice;
@@ -271,8 +343,13 @@ async function command(cmd: string, args: Record<string, unknown>): Promise<unkn
       row.archivedAt = null;
       const rows = blocks[id]!;
       const seq = rows.length;
-      rows.push(block(seq, "user", String(args.text)));
-      void reply(id, String(args.text));
+      const sent = (args.attachments as string[] | undefined ?? []).map(path => picked.get(path)).filter(file => file !== undefined);
+      const meta = sent.length ? JSON.stringify({
+        images: sent.filter(file => file.kind === "image").map(file => file.path),
+        files: sent.filter(file => file.kind === "text").map(({ name, path, size }) => ({ name, path, size })),
+      }) : null;
+      rows.push(block(seq, "user", String(args.text), meta));
+      void reply(id, String(args.text) || `the ${sent.length} attached file${sent.length === 1 ? "" : "s"}`);
       return seq;
     }
     case "search": {

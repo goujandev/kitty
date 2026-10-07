@@ -297,8 +297,29 @@ export function setApprovalMode(sessionId: string, mode: ApprovalMode): Promise<
 }
 
 /** Sends a turn. Resolves with the sequence number of the user's block. */
-export function sendTurn(sessionId: string, text: string): Promise<number> {
-  return invoke<number>("send_turn", { sessionId, text });
+export function sendTurn(sessionId: string, text: string, attachments: string[] = []): Promise<number> {
+  return invoke<number>("send_turn", { sessionId, text, attachments });
+}
+
+/** A file attached to a message: kitty's own checked copy of it. */
+export interface Attachment {
+  /** Kitty's copy, which is what is sent and shown. */
+  path: string;
+  /** The original file name. */
+  name: string;
+  kind: "image" | "text";
+  size: number;
+}
+
+/** Files taken from a pick, and why any others were not. */
+export interface PickedAttachments {
+  attached: Attachment[];
+  refused: string[];
+}
+
+/** Opens the picker for pictures and text documents to attach. */
+export function pickAttachments(): Promise<PickedAttachments> {
+  return invoke<PickedAttachments>("pick_attachments");
 }
 
 /** Answers a permission request. */

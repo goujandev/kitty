@@ -73,6 +73,28 @@ Click to see it full size`}
  * a custom scheme from `http://<scheme>.localhost`, which is what the CSP
  * allows and nothing else.
  */
-function pictureUrl(path: string): string {
+export function pictureUrl(path: string): string {
+  // The browser preview's pretend host hands out pictures it already holds.
+  if (path.startsWith("data:")) return path;
   return `http://kitty.localhost/${encodeURIComponent(path)}`;
+}
+
+/** Text documents attached to a message, recorded on its row. */
+export function blockFiles(block: Block): { name: string; path: string; size: number }[] {
+  if (!block.meta) return [];
+  try {
+    const parsed = JSON.parse(block.meta) as { files?: unknown };
+    if (!Array.isArray(parsed.files)) return [];
+    return parsed.files.filter((file): file is { name: string; path: string; size: number } =>
+      typeof file === "object" && file !== null && typeof (file as { name?: unknown }).name === "string");
+  } catch {
+    return [];
+  }
+}
+
+/** "12 KB", for a file chip. */
+export function fileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

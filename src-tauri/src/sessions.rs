@@ -93,6 +93,7 @@ pub fn pump(app: AppHandle, store: Arc<Store>, session_id: String, events: Recei
             last_assistant: None,
             pictures: HashSet::new(),
             started: SystemTime::now(),
+            turn_open: false,
         }
         .run(&events);
     });
@@ -132,6 +133,8 @@ struct Transcript<S: Sink> {
     /// When this pump started. Anything older than it belongs to an earlier
     /// run of the same conversation and is already in the transcript.
     started: SystemTime,
+    /// A turn has started and not yet ended.
+    turn_open: bool,
 }
 
 impl<S: Sink> Transcript<S> {
@@ -235,9 +238,19 @@ impl<S: Sink> Transcript<S> {
                 self.flush_events();
             }
 
-            SessionEvent::TurnStarted => {}
+            // Forwarded once per turn rather than per model call: Claude starts
+            // a message for every step of a turn, and the window only needs to
+            // know that work began.
+            SessionEvent::TurnStarted => {
+                if !self.turn_open {
+                    self.turn_open = true;
+                    self.pending.push(TranscriptEvent::TurnStarted);
+                    self.flush_events();
+                }
+            }
 
             SessionEvent::TurnEnded { stop } => {
+                self.turn_open = false;
                 self.close_all();
                 self.abandon_tools();
                 self.attach_pictures();
@@ -640,6 +653,7 @@ mod tests {
             last_assistant: None,
             pictures: std::collections::HashSet::new(),
             started: std::time::SystemTime::now(),
+            turn_open: false,
         }
         .run(&rx);
 
@@ -818,5 +832,32 @@ mod tests {
         );
         let blocks = store.blocks(&session).expect("blocks");
         assert_eq!(blocks[0].text, " lovely day");
+    }
+
+    /// Claude starts a message for every step of a turn. The window is told
+    /// once, and told again for the next turn, including one nobody sent.
+    #[test]
+    fn the_window_hears_once_per_turn_that_work_started() {
+        let (recorder, _, _) = run(vec![
+            SessionEvent::TurnStarted,
+            SessionEvent::TurnStarted,
+            SessionEvent::TurnEnded {
+                stop: StopReason::EndTurn,
+            },
+            SessionEvent::TurnStarted,
+            SessionEvent::TurnEnded {
+                stop: StopReason::EndTurn,
+            },
+        ]);
+        let kinds: Vec<&str> = recorder
+            .events()
+            .iter()
+            .filter_map(|event| match event {
+                TranscriptEvent::TurnStarted => Some("started"),
+                TranscriptEvent::TurnEnded { .. } => Some("ended"),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(kinds, ["started", "ended", "started", "ended"]);
     }
 }

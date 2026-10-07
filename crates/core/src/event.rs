@@ -474,6 +474,10 @@ pub enum TranscriptEvent {
         id: String,
         outcome: ApprovalOutcome,
     },
+    /// The agent is working. Sent once per turn, including turns the CLI
+    /// starts by itself, so the window never depends on having pressed Send
+    /// to know that something is running.
+    TurnStarted,
     TurnEnded {
         stop: StopReason,
     },

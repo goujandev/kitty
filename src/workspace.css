@@ -33,14 +33,15 @@
 
 /* Background activity for a project: working, waiting, done, failed. */
 .project-activity { display: inline-flex; align-items: center; gap: 4px; flex: none; font-size: 12px; line-height: 16px; white-space: nowrap; color: var(--muted); }
-.project-activity--working, .project-activity--approval { color: var(--blocked); }
+.project-activity--working { color: var(--frame-accent); }
+.project-activity--approval { color: var(--blocked); }
 .project-activity--completed { color: var(--ready); }
 .project-activity--failed { color: var(--danger); }
 .project-activity__working { flex: none; width: 12px; height: 12px; border: 1.5px dashed currentColor; border-radius: 50%; }
 .project-activity--compact { position: absolute; right: 0; bottom: 2px; padding: 2px; border-radius: 50%; background: var(--sidebar-bg); }
 .project-activity--compact > svg { width: 10px; height: 10px; }
 .project-activity--compact .project-activity__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-@media (prefers-reduced-motion: no-preference) {
-  .project-activity__working { animation: activity-spin 2.4s linear infinite; }
-}
+/* Turning even with reduced motion, which Windows reports when animation
+   effects are off: a still ring reads as stuck, not as working. */
+.project-activity__working { animation: activity-spin 2.4s linear infinite; }
 @keyframes activity-spin { to { transform: rotate(360deg); } }

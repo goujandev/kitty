@@ -8,6 +8,7 @@
 //! the window and returns; the frontend asks for what it needs once it has
 //! painted.
 
+mod attachments;
 mod dictation;
 mod sessions;
 mod titles;
@@ -56,6 +57,10 @@ fn picture_roots() -> Vec<PathBuf> {
         let home = PathBuf::from(home);
         roots.push(home.join(".codex"));
         roots.push(home.join(".claude"));
+    }
+    // Pictures the user attached, as kitty's own copies.
+    if let Some(dir) = attachments::root() {
+        roots.push(dir.to_path_buf());
     }
     roots
 }
@@ -746,6 +751,50 @@ async fn pick_image(app: tauri::AppHandle) -> Result<Option<String>, String> {
         .map(|p| p.to_string_lossy().into_owned()))
 }
 
+/// Opens the picker for files to attach to a message, and keeps a checked
+/// copy of each. Cancelling attaches nothing.
+#[tauri::command]
+async fn pick_attachments(app: tauri::AppHandle) -> Result<attachments::Picked, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let root = attachments::root()
+        .ok_or_else(|| "attachments are not available".to_owned())?
+        .to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .set_title("Attach pictures or text documents")
+        .add_filter(
+            "Pictures and text documents",
+            &[
+                "png", "jpg", "jpeg", "gif", "webp", "txt", "md", "markdown", "csv", "tsv", "json",
+                "jsonl", "yaml", "yml", "toml", "xml", "html", "css", "js", "jsx", "ts", "tsx",
+                "py", "rs", "go", "java", "kt", "c", "h", "cpp", "hpp", "cs", "rb", "php", "swift",
+                "sh", "ps1", "bat", "sql", "log", "ini", "cfg", "conf",
+            ],
+        )
+        .add_filter("Pictures", &["png", "jpg", "jpeg", "gif", "webp"])
+        .add_filter("All files", &["*"])
+        .pick_files(move |picked| {
+            let _ = tx.send(picked);
+        });
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut result = attachments::Picked::default();
+        for file in rx.recv().ok().flatten().unwrap_or_default() {
+            let Ok(path) = file.into_path() else {
+                continue;
+            };
+            match attachments::import(&root, &path) {
+                Ok(attachment) => result.attached.push(attachment),
+                Err(reason) => result.refused.push(reason),
+            }
+        }
+        result
+    })
+    .await
+    .map_err(|e| fail("the file picker failed", e))
+}
+
 /// The empty working directory for a conversation with no codebase.
 ///
 /// One per project rather than one shared, so two chats cannot see each
@@ -1160,8 +1209,18 @@ fn start_session_inner(
 /// Sends the user's message straight to the conversation's CLI.
 #[allow(clippy::needless_pass_by_value)]
 #[tauri::command]
-fn send_turn(state: State<'_, AppState>, session_id: String, text: String) -> Result<i64, String> {
-    send_turn_inner(&state, &session_id, &text)
+fn send_turn(
+    state: State<'_, AppState>,
+    session_id: String,
+    text: String,
+    attachments: Option<Vec<String>>,
+) -> Result<i64, String> {
+    send_turn_inner(
+        &state,
+        &session_id,
+        &text,
+        attachments.as_deref().unwrap_or_default(),
+    )
 }
 
 /// Asks the chat's own agent for a short title, in the background.
@@ -1202,9 +1261,31 @@ fn name_chat(state: &AppState, session_id: &str, message: &str) {
     });
 }
 
-fn send_turn_inner(state: &AppState, session_id: &str, text: &str) -> Result<i64, String> {
+fn send_turn_inner(
+    state: &AppState,
+    session_id: &str,
+    text: &str,
+    attached: &[String],
+) -> Result<i64, String> {
     let trimmed = text.trim_end();
-    if trimmed.is_empty() {
+    if attached.len() > attachments::MAX_PER_MESSAGE {
+        return Err(format!(
+            "attach at most {} files to one message",
+            attachments::MAX_PER_MESSAGE
+        ));
+    }
+    // Checked and read before anything is saved, so a missing file is
+    // reported instead of half a message.
+    let loaded = if attached.is_empty() {
+        Vec::new()
+    } else {
+        let root = attachments::root().ok_or_else(|| "attachments are not available".to_owned())?;
+        attached
+            .iter()
+            .map(|path| attachments::resolve(root, path))
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    if trimmed.is_empty() && loaded.is_empty() {
         return Err("nothing to send".to_owned());
     }
 
@@ -1214,13 +1295,23 @@ fn send_turn_inner(state: &AppState, session_id: &str, text: &str) -> Result<i64
         .store
         .append_block(session_id, kitty_core::BlockKind::User, trimmed)
         .map_err(|e| fail("could not save your message", e))?;
+    let shown: Vec<attachments::Attachment> = loaded.iter().map(|l| l.attachment.clone()).collect();
+    if let Some(meta) = attachments::block_meta(&shown) {
+        let _ = state.store.set_block_meta(session_id, seq, &meta);
+    }
+    // A message that is only attachments is named after the first of them.
+    let headline = if trimmed.is_empty() {
+        shown.first().map_or("Attachments", |a| a.name.as_str())
+    } else {
+        trimmed
+    };
     let first = state
         .store
         .session(session_id)
         .is_ok_and(|row| row.title.as_deref().is_none_or(str::is_empty));
-    let _ = state.store.set_title_if_unset(session_id, trimmed);
+    let _ = state.store.set_title_if_unset(session_id, headline);
     if first {
-        name_chat(state, session_id, trimmed);
+        name_chat(state, session_id, headline);
     }
     // Writing in an archived chat is a decision to carry on with it.
     if state
@@ -1239,7 +1330,10 @@ fn send_turn_inner(state: &AppState, session_id: &str, text: &str) -> Result<i64
         .get(session_id)
         .ok_or_else(|| "that session is not running".to_owned())?;
 
-    if session.session.send(trimmed) {
+    if session
+        .session
+        .send_input(attachments::turn_input(trimmed, &loaded))
+    {
         Ok(seq)
     } else {
         Err("the agent stopped accepting input".to_owned())
@@ -1418,6 +1512,7 @@ pub fn run() {
             harness_rescan,
             pick_folder,
             pick_image,
+            pick_attachments,
             theme,
             set_theme,
             zoom,
@@ -1469,6 +1564,7 @@ pub fn run() {
             if let Some(warning) = &warning {
                 eprintln!("kitty: {warning}");
             }
+            attachments::prepare(app.path().app_data_dir().ok());
 
             app.manage(AppState {
                 scan: Mutex::new(None),
@@ -1613,7 +1709,7 @@ mod tests {
             .lock()
             .unwrap()
             .insert(row.id.clone(), super::Live { session });
-        super::send_turn_inner(&state, &row.id, "Carry on").unwrap();
+        super::send_turn_inner(&state, &row.id, "Carry on", &[]).unwrap();
         loop {
             if matches!(
                 events.recv_timeout(Duration::from_secs(5)).unwrap(),
@@ -1627,6 +1723,70 @@ mod tests {
             None,
             "sending a message brings the chat back to the list"
         );
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// A picture attached in the window reaches the CLI as image content, and
+    /// the saved message remembers it so reopening the chat shows it.
+    #[cfg(windows)]
+    #[test]
+    fn an_attached_picture_reaches_the_cli_and_stays_on_the_message() {
+        use kitty_core::{HarnessId, SessionEvent};
+        use kitty_engine::{Session, SessionSpec};
+        use std::time::Duration;
+        let folder = scratch("attach-send");
+        super::attachments::prepare(Some(
+            std::env::temp_dir().join(format!("kitty-attach-root-{}", std::process::id())),
+        ));
+        let root = super::attachments::root().unwrap().to_path_buf();
+        std::fs::write(folder.join("cat.png"), b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR").unwrap();
+        let attached = super::attachments::import(&root, &folder.join("cat.png")).unwrap();
+        let binary = recording_claude(
+            &folder,
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"fake\"}\n{\"type\":\"result\",\"stop_reason\":\"end_turn\",\"is_error\":false}\n",
+        );
+        let store = kitty_store::Store::in_memory().unwrap();
+        let project = store.create_rootless_project("Attach").unwrap();
+        let row = store.create_session(&project.id, "claude", None).unwrap();
+        let (session, events) =
+            Session::start(&SessionSpec::new(HarnessId::Claude, &binary, &folder)).unwrap();
+        let state = state(
+            store,
+            HashMap::from([(row.id.clone(), super::Live { session })]),
+        );
+
+        let seq = super::send_turn_inner(
+            &state,
+            &row.id,
+            "What is this",
+            std::slice::from_ref(&attached.path),
+        )
+        .unwrap();
+        while !matches!(
+            events.recv_timeout(Duration::from_secs(5)).unwrap(),
+            SessionEvent::TurnEnded { .. }
+        ) {}
+
+        let frame: serde_json::Value = serde_json::from_str(
+            std::fs::read_to_string(folder.join("turn.txt"))
+                .unwrap()
+                .trim(),
+        )
+        .unwrap();
+        assert_eq!(frame["message"]["content"][0]["type"], "image");
+        assert_eq!(frame["message"]["content"][1]["text"], "What is this");
+        let block = state
+            .store
+            .blocks(&row.id)
+            .unwrap()
+            .into_iter()
+            .find(|b| b.seq == seq)
+            .unwrap();
+        assert!(block.meta.unwrap().contains("cat.png"));
+
+        // A path outside kitty's attachments folder is refused before sending.
+        let outside = folder.join("cat.png").to_string_lossy().into_owned();
+        assert!(super::send_turn_inner(&state, &row.id, "again", &[outside]).is_err());
         let _ = std::fs::remove_dir_all(folder);
     }
 
@@ -1651,7 +1811,7 @@ mod tests {
             HashMap::from([(row.id.clone(), super::Live { session })]),
         );
 
-        let seq = super::send_turn_inner(&state, &row.id, "Fix the heading\n").unwrap();
+        let seq = super::send_turn_inner(&state, &row.id, "Fix the heading\n", &[]).unwrap();
         loop {
             if matches!(
                 events.recv_timeout(Duration::from_secs(5)).unwrap(),

@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { Icon } from "./Icon";
-import { dictationCancel, dictationFinish, dictationStart, dictationStatus } from "../ipc/commands";
+import { dictationCancel, dictationFinish, dictationStart, dictationStatus, pickAttachments, type Attachment } from "../ipc/commands";
 import { DictationController } from "../dictationController";
 import { DictationWaveform } from "./DictationWaveform";
+import { fileSize, pictureUrl } from "./Pictures";
+import { showNotice } from "../stores/noticeStore";
 import "../dictation.css";
 
-// Drafts stay in memory while the reader moves between projects.
+// Drafts stay in memory while the reader moves between projects, and so do
+// the files waiting to go with them.
 const drafts = new Map<string, string>();
+const draftFiles = new Map<string, Attachment[]>();
 const consumedSuggestions = new Map<string, number>();
+/** As many as the host accepts on one message. */
+const MAX_FILES = 10;
 
 /**
  * The input.
@@ -40,7 +46,7 @@ export function Composer({
   tools?: React.ReactNode;
   /** Working folder and usage, in the source composer's attached lower strip. */
   context?: React.ReactNode;
-  onSend: (text: string) => void;
+  onSend: (text: string, attachments: Attachment[]) => void;
   onCancel: () => void;
   suggestion?: { text: string; id: number } | null;
   storageKey: string;
@@ -48,11 +54,18 @@ export function Composer({
 }): React.ReactElement {
   const [draft, setDraft] = useState(() => ({ key: storageKey, text: drafts.get(storageKey) ?? "" }));
   const text = draft.key === storageKey ? draft.text : drafts.get(storageKey) ?? "";
+  const [attached, setAttached] = useState(() => ({ key: storageKey, files: draftFiles.get(storageKey) ?? [] }));
+  const files = attached.key === storageKey ? attached.files : draftFiles.get(storageKey) ?? [];
+  const [picking, setPicking] = useState(false);
   const box = useRef<HTMLTextAreaElement>(null);
   const statusId = useId();
   const mounted = useRef(false);
   const latest = useRef({ storageKey, busy, disabled, onSend });
   latest.current = { storageKey, busy, disabled, onSend };
+  const updateFiles = useCallback((key: string, next: Attachment[]) => {
+    if (next.length) draftFiles.set(key, next); else draftFiles.delete(key);
+    setAttached({ key, files: next });
+  }, []);
   const [dictation] = useState(() => new DictationController({
     status: dictationStatus,
     start: dictationStart,
@@ -64,9 +77,11 @@ export function Composer({
       if (value) drafts.set(origin.key, value); else drafts.delete(origin.key);
       setDraft({ key: origin.key, text: value });
       if (send) {
-        latest.current.onSend(value.trimEnd());
+        latest.current.onSend(value.trimEnd(), draftFiles.get(origin.key) ?? []);
         drafts.delete(origin.key);
         setDraft({ key: origin.key, text: "" });
+        draftFiles.delete(origin.key);
+        setAttached({ key: origin.key, files: [] });
       } else {
         requestAnimationFrame(() => {
           if (!mounted.current || latest.current.storageKey !== origin.key) return;
@@ -138,10 +153,34 @@ export function Composer({
     if (speech.phase === "recording") { void dictation.finish(true); return; }
     if (dictating) return;
     const trimmed = text.trimEnd();
-    if (!trimmed) return;
-    onSend(trimmed);
+    if (!trimmed && files.length === 0) return;
+    onSend(trimmed, files);
     updateText("");
-  }, [busy, disabled, dictating, dictation, speech.phase, onSend, text, updateText]);
+    updateFiles(storageKey, []);
+  }, [busy, disabled, dictating, dictation, speech.phase, onSend, text, updateText, files, updateFiles, storageKey]);
+
+  /** Picks files and adds them to this draft's, never to another chat's. */
+  const attach = async () => {
+    if (disabled || picking) return;
+    const key = storageKey;
+    setPicking(true);
+    try {
+      const { attached: picked, refused } = await pickAttachments();
+      const current = draftFiles.get(key) ?? [];
+      const fresh = picked.filter(file => !current.some(have => have.path === file.path));
+      const room = Math.max(0, MAX_FILES - current.length);
+      updateFiles(key, [...current, ...fresh.slice(0, room)]);
+      const problems = [...refused];
+      if (fresh.length > room) problems.push(`Only ${MAX_FILES} files can go with one message.`);
+      if (problems.length) showNotice({ tone: "error", message: problems.join(" ") });
+    } catch (error) {
+      showNotice({ tone: "error", message: `Couldn't attach files. ${error instanceof Error ? error.message : String(error)}` });
+    } finally {
+      if (mounted.current) setPicking(false);
+      if (mounted.current && latest.current.storageKey === key) box.current?.focus();
+    }
+  };
+  const detach = (path: string) => updateFiles(storageKey, files.filter(file => file.path !== path));
 
   const microphone = () => {
     if (busy || disabled) return;
@@ -156,6 +195,16 @@ export function Composer({
       {context && <div className="composer__context" data-slot="composer-context">{context}</div>}
       <div className={`composer__box ${disabled ? "composer__box--off" : ""}`} data-slot="composer-host">
         <div className="composer__body" data-chat-composer-body="true">
+        {files.length > 0 && <ul className="attachments" aria-label="Attached files">
+          {files.map(file => <li key={file.path} className={`attachment attachment--${file.kind}`} title={file.name}>
+            {file.kind === "image"
+              ? <img className="attachment__thumb" src={pictureUrl(file.path)} alt={file.name} draggable={false} />
+              : <span className="attachment__doc"><Icon name="file" size={16} /><span className="attachment__name">{file.name}</span><span className="attachment__size">{fileSize(file.size)}</span></span>}
+            <button type="button" className="attachment__remove" aria-label={`Remove ${file.name}`} title="Remove" onClick={() => detach(file.path)}>
+              <Icon name="close" size={12} />
+            </button>
+          </li>)}
+        </ul>}
         <textarea
           ref={box}
           className="composer__input"
@@ -192,7 +241,20 @@ export function Composer({
           <button type="button" className="dictation-status__cancel" onClick={() => dictation.cancel()}>Dismiss</button>
         </div>}
         <div className={`composer__tools ${dictating ? "composer__tools--dictating" : ""}`} data-chat-composer-footer="true">
-          <div className="composer__choices">{tools}</div>
+          <div className="composer__choices">
+            <button
+              type="button"
+              className="chip chip--icon composer__attach"
+              title="Attach pictures or text documents"
+              aria-label="Attach pictures or text documents"
+              aria-busy={picking}
+              disabled={disabled || picking || dictating}
+              onClick={() => void attach()}
+            >
+              <Icon name="paperclip" size={16} />
+            </button>
+            {tools}
+          </div>
           {dictating && <>
             <button
               type="button"
@@ -236,7 +298,7 @@ export function Composer({
               className="composer__send"
               title="Send (Enter)"
               aria-label="Send"
-              disabled={disabled || speech.phase === "preparing" || speech.phase === "transcribing" || (!text.trim() && speech.phase !== "recording")}
+              disabled={disabled || speech.phase === "preparing" || speech.phase === "transcribing" || (!text.trim() && files.length === 0 && speech.phase !== "recording")}
               onClick={submit}
             >
               <Icon name="arrow" size={16} />

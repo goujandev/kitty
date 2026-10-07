@@ -368,6 +368,26 @@ fn a_cli_that_dies_mid_turn_is_reported_as_interrupted() {
     );
 }
 
+/// Nobody pressed Send: the CLI started working by itself, as Claude Code does
+/// when a background task reports back. The engine still owns that turn, so a
+/// process that dies in the middle of it ends it rather than leaving it open.
+#[test]
+fn a_turn_the_cli_starts_by_itself_is_owned_like_any_other() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let begin = r#"{"type":"stream_event","event":{"type":"message_start"}}"#;
+    let partial = delta("background task finished");
+    let (_session, events) = start(dir.path(), &[INIT, begin, &partial]);
+
+    let seen = drain(&events);
+    assert!(seen.iter().any(|e| matches!(e, SessionEvent::TurnStarted)));
+    assert_eq!(
+        seen.into_iter().filter(is_end).collect::<Vec<_>>(),
+        vec![SessionEvent::TurnEnded {
+            stop: StopReason::Interrupted
+        }]
+    );
+}
+
 #[test]
 fn garbage_on_the_wire_does_not_stop_the_stream() {
     let dir = tempfile::tempdir().expect("tempdir");

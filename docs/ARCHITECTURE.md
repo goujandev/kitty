@@ -8,13 +8,15 @@ This is the top-level design. Decisions with real trade-offs are in `adr/`.
 The evidence behind them is in `LESSONS-FROM-MONOCODE.md`, a close read of the
 closest existing product. Prototype scope is in `PROTOTYPE-1.md`.
 
-Status: planning. No code exists yet. Types below illustrate boundaries; they
-are not final signatures.
+Status: historical architecture plan. The application is implemented; types
+below illustrate the original boundaries, not the current IPC signatures.
 
-Implementation note (2026-10-07): the current app includes a Rust-owned local
-dictation prototype using Handy's speech stack. See [DICTATION.md](DICTATION.md)
-for its lifecycle and typed commands. The older planning sections below do not
-describe that feature.
+Implementation note (2026-10-07): the current app provides direct Codex/Claude
+chat, Rust-owned local dictation, validated picture/text attachments, persisted
+appearance with custom wallpaper and wallpaper-derived window colours. Turns
+follow the provider's own lifecycle; child-agent completion never ends a parent
+turn. See [README](../README.md), [DICTATION.md](DICTATION.md) and the generated
+IPC contract for current behavior. Older planning sections below are historical.
 
 ---
 

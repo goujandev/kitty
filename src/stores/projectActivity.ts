@@ -14,6 +14,8 @@ interface SessionActivity {
   projectId: string;
   status: ProjectActivityStatus | "idle";
   approvals: Set<string>;
+  /** An error was reported during the turn now running. */
+  errored: boolean;
 }
 
 interface ProjectRun {
@@ -23,7 +25,7 @@ interface ProjectRun {
 
 /** Events that change whether a conversation is working, waiting or done. */
 export function isActivityEvent(event: TranscriptEvent): boolean {
-  return event.kind === "turnEnded" || event.kind === "failed" || event.kind === "approvalRequested"
+  return event.kind === "turnStarted" || event.kind === "turnEnded" || event.kind === "failed" || event.kind === "approvalRequested"
     || event.kind === "approvalResolved" || (event.kind === "blockAppended" && event.blockKind === "user");
 }
 
@@ -56,7 +58,7 @@ export class ProjectActivityTracker {
   projectFor(sessionId: string): string | undefined { return this.sessions.get(sessionId)?.projectId; }
 
   register(sessionId: string, projectId: string): void {
-    if (!this.sessions.has(sessionId)) this.sessions.set(sessionId, { projectId, status: "idle", approvals: new Set() });
+    if (!this.sessions.has(sessionId)) this.sessions.set(sessionId, { projectId, status: "idle", approvals: new Set(), errored: false });
   }
 
   view(projectId: string | null): void {
@@ -77,6 +79,7 @@ export class ProjectActivityTracker {
   start(sessionId: string): void {
     const session = this.sessions.get(sessionId);
     if (!session) return;
+    if (!active(session.status)) session.errored = false;
     session.status = session.approvals.size ? "approval" : "working";
   }
 
@@ -98,7 +101,7 @@ export class ProjectActivityTracker {
     const session = this.sessions.get(sessionId);
     if (!session) return;
     for (const event of events) {
-      if (event.kind === "blockAppended" && event.blockKind === "user") {
+      if ((event.kind === "blockAppended" && event.blockKind === "user") || event.kind === "turnStarted") {
         this.start(sessionId);
       } else if (event.kind === "approvalRequested") {
         session.approvals.add(event.id);
@@ -107,9 +110,14 @@ export class ProjectActivityTracker {
         session.approvals.delete(event.id);
         if (session.status === "approval" && !session.approvals.size) session.status = "working";
       } else if (event.kind === "failed") {
-        this.finish(sessionId, "failed");
+        // An error while working is remembered for the end of the turn; it
+        // does not end the turn. Outside a turn it is the outcome.
+        if (active(session.status)) session.errored = true;
+        else this.finish(sessionId, "failed");
       } else if (event.kind === "turnEnded") {
-        this.finish(sessionId, event.stop.kind === "endTurn" ? "completed" : event.stop.kind === "failed" ? "failed" : "stopped");
+        const errored = session.errored;
+        session.errored = false;
+        this.finish(sessionId, errored || event.stop.kind === "failed" ? "failed" : event.stop.kind === "endTurn" ? "completed" : "stopped");
       }
     }
   }

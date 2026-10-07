@@ -49,9 +49,28 @@ Projects in the sidebar expand to show their chats. Each project and chat has a
 - **Remove from Kitty** (projects) deletes Kitty's record and stored chats for
   the project after a confirmation. The folder and its files always stay on disk.
 
-- Streaming replies, grouped tool activity, permission requests, Stop, errors and
-  a clear Working / Done / Failed state, both in the chat and as project badges in
-  the sidebar for conversations running in the background.
+- Streaming replies, permission requests, Stop, errors and a clear Working /
+  Done / Failed state, both in the chat and as project badges in the sidebar for
+  conversations running in the background.
+- Attachments: the paperclip beside the chat settings attaches pictures (PNG,
+  JPEG, GIF, WebP, up to 5 MB each) and plain-text documents (.txt, .md, .csv,
+  .json, code and similar, up to 256 KB each), up to ten per message. Pictures
+  preview in the box before sending and show in the chat afterwards. Kitty keeps
+  its own copy of each file in its data folder (`attachments`), so moving the
+  original later changes nothing. Claude receives pictures inline and Codex reads
+  them from that copy; text documents are included in the message, labelled
+  with their names. PDFs, Word files and videos are not supported.
+- A turn reads in the order it happened: each update the agent writes stays where
+  it was written, and the tool calls and thinking between updates fold into one
+  line that is open while it is the newest thing happening. A finished turn ends
+  with how long it took.
+- While the agent works, a spinner in your theme's accent colour sits directly
+  above the message box with the elapsed time and the current step, so a long
+  reply never pushes it out of sight. It keeps turning (more slowly) when
+  Windows animation effects are off. A turn counts as finished only when the
+  agent itself finishes: a Codex sub-agent finishing, a retried connection or a
+  background task do not end it, and work the agent picks up again by itself
+  shows as working again.
 - Permissions per conversation: Auto-approve all (default), Auto-approve edits,
   or Ask me.
 - Conversations and their history are saved and reopen where you left off;
@@ -59,6 +78,10 @@ Projects in the sidebar expand to show their chats. Each project and chat has a
 - A chat details pane and appearance settings with System, Light, Dark, Nord,
   Catppuccin Mocha, and Solarized Light themes. The interface is adapted from
   T3 Code; see [provenance](docs/T3-UI-PROVENANCE.md).
+- A wallpaper (Settings › Appearance) fills the chat panel, centred on the
+  message box, and colours the rest of the window: on dark themes the sidebar
+  and title bar take one solid colour from the picture, its own dark warmed
+  with a little of its accent.
 
 Kitty is a local agent workspace. Pull requests, cloud automations, and integrated editor or terminal services are not included.
 
@@ -120,6 +143,7 @@ npm run check
 npm run test:updates
 npm run test:activity
 npm run test:workspace
+npm run test:dictation
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace

@@ -58,6 +58,34 @@ test('a failure is not turned green by the turn end that follows it', () => {
   assert.deepEqual(value.snapshot().project, { status: 'failed', unread: true, runningCount: 0 });
 });
 
+test('an error during a turn is said at its end, not by ending it early', () => {
+  const value = tracker();
+  value.view('other');
+  value.transcript('chat', [start, failed]);
+  assert.deepEqual(value.running(), { chat: 'project' });
+  value.transcript('chat', [end()]);
+  assert.deepEqual(value.snapshot().project, { status: 'failed', unread: true, runningCount: 0 });
+  value.transcript('chat', [start, end()]);
+  assert.equal(value.unread().project, 'failed', 'the worst unread result still wins');
+});
+
+test('a turn the agent starts by itself is working too', () => {
+  const value = tracker();
+  value.view('other');
+  value.transcript('chat', [start, end()]);
+  value.transcript('chat', [{ kind: 'turnStarted' }]);
+  assert.deepEqual(value.running(), { chat: 'project' });
+  value.transcript('chat', [end()]);
+  assert.deepEqual(value.running(), {});
+});
+
+test('an error outside any turn is the outcome', () => {
+  const value = tracker();
+  value.view('other');
+  value.transcript('chat', [failed]);
+  assert.deepEqual(value.snapshot().project, { status: 'failed', unread: true, runningCount: 0 });
+});
+
 test('several conversations in one project are counted and the worst unread result wins', () => {
   const value = tracker();
   value.view('other');
@@ -86,6 +114,7 @@ test('only unread results survive a restart, never a running flag', () => {
 test('only lifecycle events are activity', () => {
   assert.equal(isActivityEvent(start), true);
   assert.equal(isActivityEvent(end()), true);
+  assert.equal(isActivityEvent({ kind: 'turnStarted' }), true);
   assert.equal(isActivityEvent({ kind: 'blockAppended', seq: 2, blockKind: 'assistant', text: 'Hi' }), false);
   assert.equal(isActivityEvent({ kind: 'status', text: 'Thinking' }), false);
 });

@@ -23,6 +23,7 @@ use std::time::{Duration, Instant};
 
 use kitty_core::{ApprovalOutcome, ErrorKind, HarnessId, SessionEvent, StopReason};
 use kitty_harness::{codec_for, launch_args, Codec, StartContext};
+pub use kitty_harness::{ImageInput, TurnInput};
 use kitty_supervisor::{spawn, Child, ChildEvent, Frame, SpawnSpec};
 
 /// How a session is started.
@@ -66,7 +67,7 @@ pub struct Session {
 
 enum Command {
     ApprovalMode(ApprovalMode),
-    Turn(String),
+    Turn(TurnInput),
     Approve { id: String, allow: bool },
     Cancel,
     Shutdown,
@@ -236,7 +237,13 @@ impl Session {
     /// Returns false once the session has shut down.
     #[must_use]
     pub fn send(&self, text: impl Into<String>) -> bool {
-        self.is_alive() && self.commands.send(Command::Turn(text.into())).is_ok()
+        self.send_input(TurnInput::text(text))
+    }
+
+    /// Asks the model something, with pictures. Queued like [`Self::send`].
+    #[must_use]
+    pub fn send_input(&self, input: TurnInput) -> bool {
+        self.is_alive() && self.commands.send(Command::Turn(input)).is_ok()
     }
 
     /// Answers a permission request.
@@ -291,7 +298,7 @@ struct Pump {
     /// A turn is in flight.
     busy: bool,
     /// Prompts waiting for the current turn to finish.
-    queued: Vec<String>,
+    queued: Vec<TurnInput>,
     /// A cancel was sent and we are waiting for the CLI to confirm.
     cancelling: bool,
     /// Permission requests the user has not answered yet.
@@ -363,11 +370,11 @@ impl Pump {
                     return;
                 }
 
-                Incoming::Command(Command::Turn(text)) => {
+                Incoming::Command(Command::Turn(input)) => {
                     if self.busy {
-                        self.queued.push(text);
+                        self.queued.push(input);
                     } else {
-                        self.begin(&text);
+                        self.begin(&input);
                     }
                 }
 
@@ -456,11 +463,11 @@ impl Pump {
         true
     }
 
-    fn begin(&mut self, text: &str) {
+    fn begin(&mut self, input: &TurnInput) {
         self.busy = true;
         self.awaiting_start = Some(Instant::now());
         self.cancelling = false;
-        let step = self.codec.send_turn(text);
+        let step = self.codec.send_turn_input(input);
         self.dispatch(step);
     }
 
@@ -481,6 +488,14 @@ impl Pump {
         }
 
         for event in step.events {
+            // A CLI can start a turn without being asked: Claude Code resumes
+            // when a background task reports back, Codex when a sub-agent
+            // delivers its result. That is still the agent working, so it
+            // owns the turn like any other, and Stop and queueing apply to it.
+            if matches!(event, SessionEvent::TurnStarted) && !self.busy {
+                self.busy = true;
+                self.cancelling = false;
+            }
             if matches!(
                 &event,
                 SessionEvent::TurnStarted

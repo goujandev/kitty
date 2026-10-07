@@ -32,6 +32,17 @@
 .workspace { background: var(--frame-shell); }
 .workspace .ws-sidebar--projects { background: transparent; border-right: 0; }
 .workspace__main { padding: 0 var(--frame-gap) var(--frame-gap) 0; background: transparent; }
+/* With a wallpaper on a dark theme, the sidebar, title bar and the edges
+   around the panel are one solid colour from the picture: its own dark lifted
+   a step and warmed with a little of its accent, so the chrome reads as the
+   picture's colour rather than near-black. Light themes keep their shell. */
+:root[data-wallpaper]:not([data-theme="light"]):not([data-theme="solarized-light"]) {
+  --frame-chrome: color-mix(in srgb, var(--frame-accent) 10%, hsl(from var(--frame-shell) h calc(s * 0.95) calc(l + 6)));
+}
+:root[data-wallpaper]:not([data-theme="light"]):not([data-theme="solarized-light"]) .workspace { background: var(--frame-chrome); }
+/* A narrow window's sidebar opens over the conversation, so it needs a
+   surface of its own instead of showing the chat through it. */
+.workspace--sidebar-overlay .ws-sidebar--projects { background: var(--frame-chrome, var(--frame-shell)); }
 /* Sidebar closed: it is gone entirely, and the panel gets an even margin. */
 .workspace--collapsed .workspace__main { padding-left: var(--frame-gap); }
 .workspace--collapsed .workspace-tabs { padding-left: 0; }
@@ -115,7 +126,9 @@
 .workspace .composer__choices .chip { height: 30px; padding: 0 8px; font-size: 14px; color: var(--muted); }
 .workspace .composer__choices .chip.chip--model { color: var(--frame-accent); font-weight: 500; }
 .workspace .composer__choices .chip.chip--model svg { color: var(--frame-accent); fill: currentColor; }
-.workspace .composer__choices .chip.chip--settings { width: 30px; padding: 0; justify-content: center; }
+.workspace .composer__choices .chip.chip--settings,
+.workspace .composer__choices .chip.composer__attach { width: 30px; padding: 0; justify-content: center; flex: none; }
+.composer__attach svg { flex: none; }
 .workspace .composer__choices .chip:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 7%, transparent); color: var(--text); }
 .workspace .composer__choices .chip.chip--model:hover:not(:disabled) { color: var(--frame-accent); }
 .workspace .composer__send {
@@ -173,7 +186,8 @@
 .tab.is-active .tab__open { font-weight: 500; }
 .tab__open > svg, .tab__open > .mark { flex: none; }
 .tab__title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tab__state { display: inline-grid; place-items: center; flex: none; color: var(--blocked); }
+.tab__state { display: inline-grid; place-items: center; flex: none; color: var(--frame-accent); }
+.tab__state--waiting { color: var(--blocked); }
 .tab__close { position: absolute; right: 4px; top: 50%; display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; transform: translateY(-50%); }
 .tab:hover .tab__close, .tab.is-active .tab__close, .tab__close:focus-visible { opacity: 1; }
 .tab__close:hover { background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text); }

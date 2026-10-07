@@ -1,9 +1,10 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { groupActivity, formatElapsed, savedContextNote, type DisplayBlock, type Activity, type TurnTiming } from "./activity";
+import { groupActivity, formatElapsed, savedContextNote, summarizeSteps, workedFor, type DisplayBlock, type Steps, type TurnEnd, type TurnTiming } from "./activity";
 
 import { toolMeta, type Block, type HarnessId, type ToolStatus } from "../ipc/bindings";
 import { Markdown, openLinksExternally } from "./Markdown";
-import { blockPictures, Pictures } from "./Pictures";
+import { blockFiles, blockPictures, fileSize, Pictures } from "./Pictures";
+import { Icon } from "./Icon";
 import { Mark } from "./Marks";
 
 /**
@@ -31,8 +32,6 @@ export function Transcript({
   harness,
   agentName,
   timings,
-  status,
-  waiting,
 }: {
   blocks: Block[];
   busy: boolean;
@@ -41,26 +40,22 @@ export function Transcript({
   /** What to call it. The model and its effort, not the harness. */
   agentName: string;
   timings: Record<number, TurnTiming>;
-  status: string | null;
-  waiting: boolean;
 }): React.ReactElement {
   const blocks = useMemo(() => groupActivity(rawBlocks, busy, timings), [rawBlocks, busy, timings]);
-  // While a turn runs, the last agent block is the one being written to. It
-  // stays plain text until it finishes; see Markdown.tsx for why.
+  // While a turn runs, a message that is the newest row is the one being
+  // written to. It stays plain text until it finishes; see Markdown.tsx for
+  // why. Only the newest row: once the agent has moved on to a step, the
+  // message above it is finished and keeps its formatting.
   const streamingSeq = useMemo(() => {
-    if (!busy) return null;
-    for (let i = blocks.length - 1; i >= 0; i -= 1) {
-      const block = blocks[i];
-      if (block && (block.kind === "assistant" || block.kind === "reasoning")) {
-        return block.seq;
-      }
-    }
-    return null;
+    const last = blocks.at(-1);
+    return busy && last?.kind === "assistant" ? last.seq : null;
   }, [blocks, busy]);
 
   // Which replies carry the attribution line underneath them: the last thing
   // the agent actually said before the turn went back to you. Tool rows that
   // trail a reply are part of the same answer, so they do not get their own.
+  // A running turn has not gone back to you yet, so none of its updates is
+  // signed until it ends.
   const signed = useMemo(() => {
     const seqs = new Set<number>();
     let last: number | null = null;
@@ -72,9 +67,9 @@ export function Transcript({
         last = block.seq;
       }
     }
-    if (last !== null) seqs.add(last);
+    if (last !== null && !busy) seqs.add(last);
     return seqs;
-  }, [blocks]);
+  }, [blocks, busy]);
 
   // Held in state, not a ref, because the observers below have to be set up
   // when the element appears rather than when this component mounts. The two
@@ -191,7 +186,7 @@ export function Transcript({
     // reader intent again so a wheel gesture between frames wins.
     const frame = requestAnimationFrame(follow);
     return () => cancelAnimationFrame(frame);
-  }, [scroller, blocks, total, viewport, measured, busy, status, waiting]);
+  }, [scroller, blocks, total, viewport, measured, busy]);
 
   const measure = useCallback((seq: number, height: number) => {
     if (height === 0) return;
@@ -246,11 +241,9 @@ export function Transcript({
               block={block}
               top={offsets[first + index] ?? 0}
               streaming={block.seq === streamingSeq}
-              signed={signed.has(block.seq) && block.seq !== streamingSeq}
+              signed={signed.has(block.seq)}
               harness={harness}
               agentName={agentName}
-              status={status}
-              waiting={waiting}
               onMeasure={measure}
             />
           ))}
@@ -273,8 +266,6 @@ const Row = memo(function Row({
   signed,
   harness,
   agentName,
-  status,
-  waiting,
   onMeasure,
 }: {
   block: DisplayBlock;
@@ -285,8 +276,6 @@ const Row = memo(function Row({
   signed: boolean;
   harness: HarnessId | null;
   agentName: string;
-  status: string | null;
-  waiting: boolean;
   onMeasure: (seq: number, height: number) => void;
 }): React.ReactElement {
   const node = useRef<HTMLDivElement>(null);
@@ -303,8 +292,8 @@ const Row = memo(function Row({
   }, [block.seq, onMeasure]);
 
   return (
-    <div className={`row msg msg--${block.kind}${block.activity ? " msg--activity" : ""}`} style={{ top }} ref={node} data-block-seq={block.seq}>
-      {block.activity ? <ActivityGroup activity={block.activity} status={status} waiting={waiting} /> : <Body block={block} streaming={streaming} />}
+    <div className={`row msg msg--${block.steps ? "steps" : block.turnEnd ? "turn-end" : block.kind}`} style={{ top }} ref={node} data-block-seq={block.seq}>
+      {block.steps ? <StepsGroup steps={block.steps} /> : block.turnEnd ? <TurnEndLine end={block.turnEnd} /> : <Body block={block} streaming={streaming} />}
       {signed && (
         // Who said it, stated after the fact rather than announced before it.
         // The answer is the thing worth reading; which model produced it is a
@@ -319,28 +308,40 @@ const Row = memo(function Row({
   );
 });
 
-function ActivityGroup({ activity, status, waiting }: { activity: Activity; status: string | null; waiting: boolean }): React.ReactElement {
-  const [expanded, setExpanded] = useState(activity.active);
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    setExpanded(activity.active);
-    if (!activity.active) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [activity.active]);
-  const tools = activity.blocks.filter(block => block.kind === "tool");
-  const current = [...tools].reverse().find(block => toolMeta(block).status === "running");
-  const outcome = activity.timing?.outcome;
-  const label = activity.active ? (waiting ? "Waiting for your approval" : "Working") : outcome === "failed" ? "Failed" : outcome === "stopped" ? "Stopped" : "Worked";
-  const elapsed = activity.active ? now - activity.startedAt : activity.timing?.endedAt !== undefined ? activity.timing.endedAt - activity.startedAt : null;
-  return <div className={`activity${activity.active ? " activity--active" : ""}`}>
-    <button className="activity__toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
-      {activity.active && !waiting && <span className="spinner" aria-hidden="true" />}
-      <span>{label}{elapsed !== null ? `${activity.active ? " · " : " for "}${formatElapsed(elapsed)}` : ""}</span>
+/**
+ * Tool calls and thinking between two messages, as one line.
+ *
+ * Open while it is the newest thing in a running turn, so each step appears as
+ * it happens; folded to a summary once the agent moves on, and openable again.
+ */
+function StepsGroup({ steps }: { steps: Steps }): React.ReactElement {
+  const [expanded, setExpanded] = useState(steps.live);
+  useEffect(() => setExpanded(steps.live), [steps.live]);
+  const latest = [...steps.blocks].reverse().find(block => block.kind === "tool");
+  const failed = steps.blocks.filter(block => block.kind === "tool" && toolMeta(block).status === "failed").length;
+  return <div className={`steps${steps.live ? " steps--live" : ""}`}>
+    <button className="steps__toggle" type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>
+      <span className="steps__chevron" aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+      <span className="steps__summary">{summarizeSteps(steps.blocks)}</span>
+      {failed > 0 && <span className="steps__failed">{failed} failed</span>}
+      {!expanded && latest && <span className="steps__latest">{latest.text}</span>}
     </button>
-    {activity.active && <div className="activity__status" role="status">{waiting ? "Resume by responding below." : status ?? current?.text ?? "Thinking…"}</div>}
-    {expanded && activity.blocks.length > 0 && <div className="activity__history">{activity.blocks.map(block => <div key={block.seq} className={`msg msg--${block.kind}`}><Body block={block} streaming={activity.active && block.kind !== "tool"} /></div>)}</div>}
+    {expanded && <div className="steps__list">
+      {steps.blocks.map(block => <div key={block.seq} className={`msg msg--${block.kind}`}>
+        <Body block={block} streaming={steps.live && block.kind === "reasoning"} />
+      </div>)}
+    </div>}
+  </div>;
+}
+
+/** How a finished turn went, said once under it. */
+function TurnEndLine({ end }: { end: TurnEnd }): React.ReactElement {
+  const outcome = end.timing?.outcome;
+  const label = outcome === "failed" ? "Failed" : outcome === "stopped" ? "Stopped" : "Worked";
+  const elapsed = workedFor(end.timing?.endedAt !== undefined ? end.timing : undefined, Date.now());
+  return <div className={`turn-end turn-end--${outcome ?? "worked"}`}>
+    <span className="turn-end__mark" aria-hidden="true">{outcome === "failed" ? "✕" : outcome === "stopped" ? "–" : "✓"}</span>
+    <span>{label}{elapsed !== null ? ` for ${formatElapsed(elapsed)}` : ""}</span>
   </div>;
 }
 
@@ -427,8 +428,26 @@ function Body({
   }
 
   // A user's own message is shown exactly as typed. Rendering it as markdown
-  // would silently reformat what they wrote.
-  const plain = streaming || block.kind === "user";
+  // would silently reformat what they wrote. What they attached sits above
+  // the words, the way it was laid out in the box.
+  if (block.kind === "user") {
+    const pictures = blockPictures(block);
+    const files = blockFiles(block);
+    return (
+      <div className="msg__user">
+        {(pictures.length > 0 || files.length > 0) && <div className="msg__attachments">
+          <Pictures paths={pictures} />
+          {files.length > 0 && <ul className="file-chips" aria-label="Attached documents">
+            {files.map(file => <li key={file.path} className="file-chip" title={file.name}>
+              <Icon name="file" size={15} /><span className="file-chip__name">{file.name}</span><span className="file-chip__size">{fileSize(file.size)}</span>
+            </li>)}
+          </ul>}
+        </div>}
+        {block.text && <div className="msg__text">{block.text}</div>}
+      </div>
+    );
+  }
+  const plain = streaming;
 
   return (
     <>

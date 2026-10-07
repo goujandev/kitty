@@ -1,7 +1,7 @@
 {
   "name": "kitty",
   "private": true,
-  "version": "0.2.3",
+  "version": "0.2.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,7 +13,7 @@
     "bundle": "tauri build --bundles nsis",
     "check:contract": "node scripts/check-contract.mjs",
     "test:updates": "node --test scripts/update-controller.test.mjs scripts/update-settings.test.mjs scripts/release.test.mjs",
-    "test:activity": "node --test scripts/activity.test.mjs scripts/project-activity.test.mjs",
+    "test:activity": "node --test scripts/activity.test.mjs scripts/project-activity.test.mjs scripts/chat-lifecycle.test.mjs",
     "test:workspace": "node --test scripts/workspace.test.mjs scripts/sidebar.test.mjs scripts/tabs.test.mjs",
     "test:dictation": "node --test scripts/dictation.test.mjs"
   },

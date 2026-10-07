@@ -180,6 +180,8 @@ export type TranscriptEvent =
       detail: string | null;
     }
   | { kind: "approvalResolved"; id: string; outcome: ApprovalOutcome }
+  /** The agent is working, including on a turn it started by itself. */
+  | { kind: "turnStarted" }
   | { kind: "turnEnded"; stop: StopReason }
   | { kind: "usage"; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; reasoningTokens: number }
   | { kind: "context"; used: number | null; window: number | null }

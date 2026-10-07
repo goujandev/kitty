@@ -17,7 +17,8 @@ Inspected sources under `apps/web/src`: `index.css`, `projectIdentity.ts`,
 `ProjectFavicon.tsx`, `ProjectMonogram.tsx`, `ChatView.tsx`, and the chat directory's
 `ChatCanvas.tsx`, `ChatComposer.tsx`, `ComposerSurface.tsx`,
 `ComposerPrimaryActions.tsx`, and `composerProviderState.tsx`.
-The local source cache is ignored under `.screenshots/t3-reference`.
+The inspection used an ignored local source cache under
+`.screenshots/t3-reference`; that disposable cache is not a release asset.
 
 T3's theme, component geometry and monogram algorithm/SVG are adapted under MIT.
 Copyright 2026 T3 Tools Inc. The complete notice is retained in
@@ -27,7 +28,7 @@ Its ISC/Feather notices are retained in
 [licenses/Lucide-LICENSE.txt](licenses/Lucide-LICENSE.txt). Both notices are bundled
 in Settings > Open-source credits. Kitty's existing app icon is unchanged.
 
-## Current presentation
+## Original reference presentation
 
 - 256px sidebar, collapse control before the brand, search/folder/folder-plus/
   new-chat controls in one row, project monograms and project cards, a Settled
@@ -53,7 +54,7 @@ in Settings > Open-source credits. Kitty's existing app icon is unchanged.
   theme, 100% zoom and a 256px sidebar to match the requested reference. Later
   theme, zoom and resize choices remain saved normally.
 
-Kitty-specific adaptations: the folder strip opens the project chooser and shows
+Kitty-specific adaptations at that stage: the folder strip opens the project chooser and shows
 the actual path in its tooltip. Working/approval badges are orange; unseen
 successful results are green, failures and stops distinct, and unread results
 clear only when actually viewed. Unsupported Git, attachment, terminal and cloud
@@ -66,5 +67,8 @@ IPC contracts stay in Rust.
 The adaptation was first built for the agent-team prototype (T-012 to T-016),
 whose Boss, Team lead and worker panes were removed with orchestration in T-024
 (see `coordination/tasks.md`). The visual measurements above were validated then
-against the reference screenshot; the direct-chat sidebar list and title bar
-buttons are the only layout additions since.
+against the reference screenshot. Later direct-chat changes add tabs, custom
+wallpapers and derived chrome colours, local dictation, image/text attachments,
+and a persistent working indicator. The current implemented interface and
+supported controls are documented in [README.md](../README.md); the measurements
+above preserve the original reference and attribution, not current defaults.

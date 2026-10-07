@@ -33,7 +33,7 @@ use kitty_core::{
 };
 use serde_json::{json, Value};
 
-use crate::{first_line, short_path, str_field, u64_field, Codec, StartContext, Step};
+use crate::{first_line, short_path, str_field, u64_field, Codec, StartContext, Step, TurnInput};
 
 /// Argv after the resolved binary.
 #[must_use]
@@ -56,7 +56,7 @@ pub struct CodexCodec {
     thread_id: Option<String>,
     turn_id: Option<String>,
     /// A prompt asked for before the thread was ready.
-    queued_turn: Option<String>,
+    queued_turn: Option<TurnInput>,
     /// Pending permission requests, by the id we handed upwards, to the
     /// JSON-RPC id the server is waiting on.
     approvals: HashMap<String, u64>,
@@ -85,11 +85,22 @@ impl CodexCodec {
         json!({ "id": self.next_id, "method": method, "params": params }).to_string()
     }
 
-    fn turn_start_frame(&mut self, text: &str) -> Option<String> {
+    fn turn_start_frame(&mut self, input: &TurnInput) -> Option<String> {
         let thread = self.thread_id.clone()?;
+        // Codex reads attached pictures from disk itself, so they go by path.
+        let mut items: Vec<Value> = Vec::new();
+        if !input.text.is_empty() || input.images.is_empty() {
+            items.push(json!({ "type": "text", "text": input.text }));
+        }
+        items.extend(
+            input
+                .images
+                .iter()
+                .map(|image| json!({ "type": "localImage", "path": image.path })),
+        );
         let mut params = json!({
             "threadId": thread,
-            "input": [{ "type": "text", "text": text }],
+            "input": items,
         });
         if let Some(model) = &self.model {
             params["model"] = json!(model);
@@ -144,16 +155,16 @@ impl Codec for CodexCodec {
         Step::send(line)
     }
 
-    fn send_turn(&mut self, text: &str) -> Step {
+    fn send_turn_input(&mut self, input: &TurnInput) -> Step {
         if let Some(message) = &self.startup_error {
             return rejected_request(message.clone());
         }
-        if let Some(line) = self.turn_start_frame(text) {
+        if let Some(line) = self.turn_start_frame(input) {
             return Step::send(line);
         }
         // The handshake is still running. Hold it; `on_frame` sends it the
         // moment the thread opens.
-        self.queued_turn = Some(text.to_owned());
+        self.queued_turn = Some(input.clone());
         Step::none()
     }
 
@@ -300,8 +311,8 @@ impl CodexCodec {
                             .into(),
                     });
                 }
-                if let Some(text) = self.queued_turn.take() {
-                    if let Some(line) = self.turn_start_frame(&text) {
+                if let Some(input) = self.queued_turn.take() {
+                    if let Some(line) = self.turn_start_frame(&input) {
                         step.send.push(line);
                     }
                 }
@@ -313,8 +324,30 @@ impl CodexCodec {
         }
     }
 
+    /// Whether a notification is about another thread than this
+    /// conversation's.
+    ///
+    /// Sub-agents run in threads of their own and their traffic arrives on
+    /// the same connection. Their turns starting and finishing are not ours,
+    /// and their text is not the reply; the parent thread reports them as
+    /// items of its own, which is what the transcript shows.
+    fn other_thread(&self, params: &Value) -> bool {
+        matches!(
+            (self.thread_id.as_deref(), str_field(params, "threadId")),
+            (Some(ours), Some(theirs)) if ours != theirs
+        )
+    }
+
     fn on_notification(&mut self, method: &str, params: Option<&Value>) -> Step {
         let params = params.unwrap_or(&Value::Null);
+
+        if self.other_thread(params)
+            && (method.starts_with("turn/")
+                || method.starts_with("item/")
+                || matches!(method, "error" | "thread/tokenUsage/updated"))
+        {
+            return Step::none();
+        }
 
         match method {
             "thread/started" => {
@@ -392,9 +425,19 @@ impl CodexCodec {
             }
 
             "error" => {
-                let message = str_field(params, "message")
+                // The text lives on the nested turn error; older servers put
+                // it at the top.
+                let message = params
+                    .get("error")
+                    .and_then(|error| str_field(error, "message"))
+                    .or_else(|| str_field(params, "message"))
                     .unwrap_or("the CLI reported an error")
                     .to_owned();
+                // A dropped connection that Codex is already retrying is not
+                // a failed turn. It is still working, so say what it is doing.
+                if params.get("willRetry").and_then(Value::as_bool) == Some(true) {
+                    return Step::event(SessionEvent::Status { text: message });
+                }
                 Step::event(SessionEvent::Error {
                     error_kind: classify(&message),
                     message,
@@ -558,6 +601,38 @@ fn tool_title(kind: &str, item: &Value) -> String {
             let server = str_field(item, "server").unwrap_or("mcp");
             let tool = str_field(item, "tool").unwrap_or("tool");
             format!("{server}/{tool}")
+        }
+        "collabAgentToolCall" => {
+            let verb = match str_field(item, "tool") {
+                Some("spawnAgent") => "Start a sub-agent",
+                Some("wait") => "Wait for sub-agents",
+                Some("sendInput" | "sendMessage" | "followupTask") => "Message a sub-agent",
+                Some("resumeAgent") => "Resume a sub-agent",
+                Some("closeAgent") => "Close a sub-agent",
+                Some("interruptAgent") => "Interrupt a sub-agent",
+                Some("listAgents") => "List sub-agents",
+                _ => "Sub-agent",
+            };
+            match str_field(item, "prompt").filter(|p| !p.trim().is_empty()) {
+                Some(prompt) => format!("{verb}: {}", first_line(prompt, 70)),
+                None => verb.to_owned(),
+            }
+        }
+        "subAgentActivity" => {
+            // A path such as "/root/pineapple"; the last part is its name.
+            let who = str_field(item, "agentPath")
+                .and_then(|p| p.rsplit('/').find(|part| !part.is_empty()))
+                .map_or_else(
+                    || "Sub-agent".to_owned(),
+                    |name| format!("Sub-agent {name}"),
+                );
+            match str_field(item, "kind") {
+                Some("started") => format!("{who} started"),
+                Some("completed") => format!("{who} finished"),
+                Some("interrupted") => format!("{who} stopped"),
+                Some("interacted") => format!("{who} reported back"),
+                _ => who,
+            }
         }
         other => other.to_owned(),
     }
@@ -972,6 +1047,118 @@ mod tests {
             }
         }
         assert_eq!(text, "Hello, lovely human.");
+    }
+
+    /// What made Kitty say "Worked for" while it was still working: a
+    /// sub-agent finishing its own turn was taken for the conversation's.
+    #[test]
+    fn a_sub_agents_turn_and_text_are_not_the_conversations() {
+        let mut codec = CodexCodec::new();
+        handshake(&mut codec);
+        for frame in [
+            json!({"method": "turn/started", "params": {"threadId": "child", "turn": {"id": "c1"}}}),
+            json!({"method": "item/agentMessage/delta", "params": {"threadId": "child", "delta": "PINEAPPLE"}}),
+            json!({"method": "item/completed", "params": {"threadId": "child", "item": {
+                "type": "agentMessage", "id": "m9", "text": "PINEAPPLE"}}}),
+            json!({"method": "turn/completed", "params": {"threadId": "child", "turn": {"id": "c1", "status": "completed"}}}),
+            json!({"method": "error", "params": {"threadId": "child", "turnId": "c1", "willRetry": false,
+                "error": {"message": "child failed"}}}),
+        ] {
+            assert!(feed(&mut codec, frame).is_empty());
+        }
+        let ours = feed(
+            &mut codec,
+            json!({"method": "turn/completed", "params": {"threadId": "thread-1", "turn": {"id": "t1", "status": "completed"}}}),
+        );
+        assert_eq!(
+            ours.events,
+            vec![SessionEvent::TurnEnded {
+                stop: StopReason::EndTurn
+            }]
+        );
+    }
+
+    #[test]
+    fn attached_pictures_go_by_path_after_the_words() {
+        let mut codec = CodexCodec::new();
+        // Asked for during the handshake: held, then sent with its pictures.
+        let mut held = codec.start(&ctx());
+        let input = crate::TurnInput {
+            text: "What is in this?".into(),
+            images: vec![crate::ImageInput {
+                path: r"C:\data\attachments\1\cat.png".into(),
+                mime: "image/png".into(),
+                bytes: vec![1, 2, 3],
+            }],
+        };
+        assert!(codec.send_turn_input(&input).is_empty());
+        held = feed(
+            &mut codec,
+            json!({"id": parse(&held.send[0])["id"], "result": {}}),
+        );
+        let open = parse(&held.send[1]);
+        let ready = feed(
+            &mut codec,
+            json!({"id": open["id"], "result": {"thread": {"id": "thread-1"}}}),
+        );
+        let turn = parse(ready.send.last().expect("the held turn"));
+        assert_eq!(turn["params"]["input"][0]["text"], "What is in this?");
+        assert_eq!(turn["params"]["input"][1]["type"], "localImage");
+        assert_eq!(
+            turn["params"]["input"][1]["path"],
+            r"C:\data\attachments\1\cat.png"
+        );
+
+        // Only pictures: no empty text item.
+        let only = codec.send_turn_input(&crate::TurnInput {
+            text: String::new(),
+            images: input.images,
+        });
+        let only = parse(&only.send[0]);
+        assert_eq!(only["params"]["input"].as_array().map(Vec::len), Some(1));
+        assert_eq!(only["params"]["input"][0]["type"], "localImage");
+    }
+
+    #[test]
+    fn sub_agent_rows_are_named_for_people() {
+        let mut codec = CodexCodec::new();
+        handshake(&mut codec);
+        let step = feed(
+            &mut codec,
+            json!({"method": "item/started", "params": {"threadId": "thread-1", "item": {
+                "type": "subAgentActivity", "id": "call_1", "kind": "started",
+                "agentThreadId": "child", "agentPath": "/root/pineapple"}}}),
+        );
+        assert!(matches!(
+            step.events.as_slice(),
+            [SessionEvent::ToolStarted { title, .. }] if title == "Sub-agent pineapple started"
+        ));
+    }
+
+    #[test]
+    fn an_error_codex_is_retrying_is_a_status_not_a_failure() {
+        let mut codec = CodexCodec::new();
+        handshake(&mut codec);
+        let retrying = feed(
+            &mut codec,
+            json!({"method": "error", "params": {"threadId": "thread-1", "turnId": "t1", "willRetry": true,
+                "error": {"message": "Reconnecting... 1/5"}}}),
+        );
+        assert_eq!(
+            retrying.events,
+            vec![SessionEvent::Status {
+                text: "Reconnecting... 1/5".into()
+            }]
+        );
+        let fatal = feed(
+            &mut codec,
+            json!({"method": "error", "params": {"threadId": "thread-1", "turnId": "t1", "willRetry": false,
+                "error": {"message": "usage limit reached"}}}),
+        );
+        assert!(matches!(
+            fatal.events.as_slice(),
+            [SessionEvent::Error { message, .. }] if message == "usage limit reached"
+        ));
     }
 
     #[test]

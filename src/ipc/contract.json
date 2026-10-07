@@ -247,6 +247,9 @@
       "outcome": "allowed"
     },
     {
+      "kind": "turnStarted"
+    },
+    {
       "kind": "turnEnded",
       "stop": {
         "kind": "endTurn"

@@ -123,6 +123,7 @@ fn transcript_events() -> Vec<TranscriptEvent> {
             id: "codex-0".into(),
             outcome: ApprovalOutcome::Allowed,
         },
+        TranscriptEvent::TurnStarted,
         TranscriptEvent::TurnEnded {
             stop: StopReason::EndTurn,
         },
@@ -287,7 +288,7 @@ fn every_variant_is_covered() {
     assert_eq!(stop_reasons().len(), 7, "add the new StopReason sample");
     assert_eq!(
         transcript_events().len(),
-        14,
+        15,
         "add the new TranscriptEvent sample"
     );
     assert_eq!(

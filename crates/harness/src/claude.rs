@@ -30,7 +30,7 @@ use kitty_core::{
 };
 use serde_json::{json, Value};
 
-use crate::{first_line, str_field, summarize, u64_field, Codec, StartContext, Step};
+use crate::{first_line, str_field, summarize, u64_field, Codec, StartContext, Step, TurnInput};
 
 /// Argv after the resolved binary.
 ///
@@ -91,13 +91,34 @@ impl Codec for ClaudeCodec {
         Step::none()
     }
 
-    fn send_turn(&mut self, text: &str) -> Step {
+    fn send_turn_input(&mut self, input: &TurnInput) -> Step {
+        use base64::Engine as _;
+        // Pictures first, then the words, as the API recommends. An empty
+        // text block is refused outright, so a message that is only pictures
+        // sends none.
+        let mut content: Vec<Value> = input
+            .images
+            .iter()
+            .map(|image| {
+                json!({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": image.mime,
+                        "data": base64::engine::general_purpose::STANDARD.encode(&image.bytes),
+                    },
+                })
+            })
+            .collect();
+        if !input.text.is_empty() || content.is_empty() {
+            content.push(json!({ "type": "text", "text": input.text }));
+        }
         Step::send(
             json!({
                 "type": "user",
                 "message": {
                     "role": "user",
-                    "content": [{ "type": "text", "text": text }],
+                    "content": content,
                 },
             })
             .to_string(),
@@ -142,6 +163,18 @@ impl Codec for ClaudeCodec {
             // our business and it must not be fatal.
             return Step::none();
         };
+
+        // A sub-agent's own messages carry the id of the tool call that
+        // started it. They are its work, not the reply: the tool row already
+        // stands for it, and letting its text through would stream it into
+        // the main answer, or replace that answer with the sub-agent's.
+        if matches!(
+            str_field(&msg, "type"),
+            Some("stream_event" | "assistant" | "user")
+        ) && str_field(&msg, "parent_tool_use_id").is_some_and(|id| !id.is_empty())
+        {
+            return Step::none();
+        }
 
         match str_field(&msg, "type") {
             Some("system") => self.on_system(&msg),
@@ -735,6 +768,61 @@ mod tests {
         let b: serde_json::Value = serde_json::from_str(&second.send[0]).expect("json");
         assert_eq!(a["request"]["subtype"], "interrupt");
         assert_ne!(a["request_id"], b["request_id"]);
+    }
+
+    #[test]
+    fn attached_pictures_travel_inline_before_the_words() {
+        let mut codec = ClaudeCodec::new();
+        let image = crate::ImageInput {
+            path: r"C:\data\attachments\1\cat.png".into(),
+            mime: "image/png".into(),
+            bytes: vec![0x89, b'P', b'N', b'G'],
+        };
+        let step = codec.send_turn_input(&crate::TurnInput {
+            text: "What is in this?".into(),
+            images: vec![image.clone()],
+        });
+        let sent: serde_json::Value = serde_json::from_str(&step.send[0]).expect("json");
+        let content = &sent["message"]["content"];
+        assert_eq!(content[0]["type"], "image");
+        assert_eq!(content[0]["source"]["media_type"], "image/png");
+        assert_eq!(content[0]["source"]["data"], "iVBORw==");
+        assert_eq!(content[1]["text"], "What is in this?");
+
+        // Only a picture: the API refuses an empty text block, so none is sent.
+        let only = codec.send_turn_input(&crate::TurnInput {
+            text: String::new(),
+            images: vec![image],
+        });
+        let sent: serde_json::Value = serde_json::from_str(&only.send[0]).expect("json");
+        assert_eq!(sent["message"]["content"].as_array().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn a_sub_agents_messages_stay_out_of_the_reply() {
+        let mut codec = ClaudeCodec::new();
+        for frame in [
+            json!({"type":"stream_event","parent_tool_use_id":"toolu_task",
+                   "event":{"type":"content_block_delta","index":0,
+                            "delta":{"type":"text_delta","text":"sub-agent notes"}}}),
+            json!({"type":"assistant","parent_tool_use_id":"toolu_task",
+                   "message":{"content":[{"type":"text","text":"sub-agent notes"}]}}),
+            json!({"type":"stream_event","parent_tool_use_id":"toolu_task",
+                   "event":{"type":"message_start"}}),
+        ] {
+            assert!(feed(&mut codec, frame).is_empty());
+        }
+        let main = feed(
+            &mut codec,
+            json!({"type":"assistant","parent_tool_use_id":null,
+                   "message":{"content":[{"type":"text","text":"The answer"}]}}),
+        );
+        assert_eq!(
+            main.events,
+            vec![SessionEvent::MessageDone {
+                text: "The answer".into()
+            }]
+        );
     }
 
     #[test]

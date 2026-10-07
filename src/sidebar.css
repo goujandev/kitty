@@ -99,7 +99,8 @@
 .ws-chat.is-active .ws-chat__model { color: var(--muted); }
 .ws-chat:has(.ws-chat__text) .ws-row-more { align-self: center; }
 .ws-chat__hint { flex: none; color: var(--muted-3); font-size: var(--font-xs); font-weight: 400; line-height: 16px; }
-.ws-chat__state { display: inline-grid; place-items: center; flex: none; color: var(--blocked); }
+.ws-chat__state { display: inline-grid; place-items: center; flex: none; color: var(--frame-accent); }
+.ws-chat__state--waiting { color: var(--blocked); }
 .ws-chat.is-archived .ws-chat__open { color: var(--muted-3); }
 .ws-chat.is-archived .ws-chat__open:hover { color: var(--text); }
 .ws-chat-empty { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 5px 8px 5px 34px; color: var(--muted-3); font-size: var(--font-sm); line-height: 20px; }

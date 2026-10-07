@@ -284,7 +284,9 @@ test('waveform uses bounded centered bars, quiet dots and latest volume on the r
 
 const composerSource = readFileSync(new URL('../src/views/Composer.tsx', import.meta.url), 'utf8')
   .replace('import { Icon } from "./Icon";', 'const Icon = () => null;')
-  .replace('import { dictationCancel, dictationFinish, dictationStart, dictationStatus } from "../ipc/commands";', 'const dictationCancel = async () => {}; const dictationFinish = async () => ""; const dictationStart = async () => {}; const dictationStatus = async () => ({id:null, phase:"idle", ready:false, progress:null, error:null});')
+  .replace('import { dictationCancel, dictationFinish, dictationStart, dictationStatus, pickAttachments, type Attachment } from "../ipc/commands";', 'const dictationCancel = async () => {}; const dictationFinish = async () => ""; const dictationStart = async () => {}; const dictationStatus = async () => ({id:null, phase:"idle", ready:false, progress:null, error:null}); const pickAttachments = async () => ({attached:[], refused:[]});')
+  .replace('import { fileSize, pictureUrl } from "./Pictures";', 'const fileSize = bytes => `${bytes} B`; const pictureUrl = path => path;')
+  .replace('import { showNotice } from "../stores/noticeStore";', 'const showNotice = () => {};')
   .replace('"../dictationController"', JSON.stringify('data:text/javascript;base64,' + Buffer.from(code).toString('base64')))
   .replace('"./DictationWaveform"', JSON.stringify(waveformUrl))
   .replace('import "../dictation.css";', '')

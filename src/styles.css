@@ -684,7 +684,7 @@ body {
 }
 
 .chat__dot--busy {
-  background: var(--blocked);
+  background: var(--frame-accent);
 }
 
 .chat__title {
@@ -804,6 +804,153 @@ body {
   padding: 9px 14px;
   border-radius: var(--r-lg);
   background: var(--message-surface);
+}
+
+/* The words and what came with them, together on the right. */
+.msg__user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 78%;
+  min-width: 0;
+}
+
+.msg__user .msg__text {
+  max-width: 100%;
+}
+
+.msg__attachments {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.msg__attachments .shots {
+  justify-content: flex-end;
+  margin: 0;
+}
+
+.msg__attachments .shot {
+  max-width: 240px;
+}
+
+.msg__attachments .shot img {
+  max-height: 200px;
+}
+
+.file-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 260px;
+  padding: 7px 11px;
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--r-md);
+  background: var(--message-surface);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.file-chip svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.file-chip__name,
+.attachment__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-chip__size,
+.attachment__size {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Files waiting in the box, above where you type. */
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.attachment {
+  position: relative;
+  flex: none;
+}
+
+.attachment__thumb {
+  display: block;
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--r-md);
+  object-fit: cover;
+  background: var(--panel);
+}
+
+.attachment__doc {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 240px;
+  height: 64px;
+  padding: 0 28px 0 12px;
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.attachment__doc svg {
+  flex: none;
+  color: var(--muted);
+}
+
+.attachment__remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--panel-edge);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.attachment__remove:hover {
+  background: var(--secondary-hover, var(--panel-2));
+}
+
+.attachment__remove:focus-visible {
+  outline: 2px solid var(--frame-accent);
+  outline-offset: 1px;
 }
 
 /* Who said it, after the fact. */
@@ -932,7 +1079,7 @@ body {
   height: 9px;
   border-radius: 50%;
   border: 2px solid var(--panel-edge);
-  border-top-color: var(--blocked);
+  border-top-color: var(--frame-accent);
   animation: spin 1.8s linear infinite;
 }
 
@@ -1648,8 +1795,12 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .skeleton, .spinner {
+  .skeleton {
     animation: none;
+  }
+  /* Slower, never stopped: a still spinner reads as a frozen app. */
+  .spinner {
+    animation-duration: 2.4s;
   }
 }
 
@@ -2164,7 +2315,7 @@ textarea:focus-visible {
 .chat__actions { display: flex; align-items: center; gap: 3px; margin-left: auto; }
 .chat__badge { flex: none; padding: 2px 6px; border-radius: 4px; background: var(--secondary); color: var(--muted); font-size: 12px; }
 .workspace .chat__dot { width: 6px; height: 6px; background: var(--muted-3); }
-.workspace .chat__dot--busy { background: var(--blocked); }
+.workspace .chat__dot--busy { background: var(--frame-accent); }
 
 .workspace .chat--blank .dock { margin: 0; padding-bottom: clamp(24px, 9vh, 90px); }
 .workspace .chat--blank .dock::before { content: none; }
@@ -2238,7 +2389,7 @@ textarea:focus-visible {
 .thread-card__meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
 .thread-card__aside { display: flex; align-items: flex-end; flex-direction: column; gap: 6px; flex: none; color: var(--muted-2); font-size: 12px; }
 .thread-card__state { padding: 2px 5px; border-radius: 4px; color: var(--muted); background: var(--secondary); font-size: 12px; }
-.thread-card__state.is-working { color: var(--blocked); background: color-mix(in srgb, var(--blocked) 10%, transparent); }
+.thread-card__state.is-working { color: var(--frame-accent); background: color-mix(in srgb, var(--frame-accent) 12%, transparent); }
 .thread-library__empty { display: flex; align-items: center; justify-content: center; flex-direction: column; flex: 1; gap: 8px; min-height: 220px; padding: 35px 20px; color: var(--muted); text-align: center; font-size: 13px; }
 .thread-library__empty svg { width: 27px; height: 27px; margin-bottom: 8px; color: var(--muted-3); }
 .thread-library__empty h2,
@@ -2370,6 +2521,12 @@ a:focus-visible,
   .workspace *,
   .modal-backdrop,
   .search-overlay { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  /* Windows turns this on with "Animation effects" off, which stopped every
+     spinner dead and left "working" looking like "stuck". A small turning
+     ring is the signal itself, not decoration, so it keeps turning, slowly. */
+  .workspace .working-bar__spinner,
+  .workspace .spinner,
+  .workspace .project-activity__working { animation-duration: 2.4s !important; }
 }
 
 .settings__preview {
@@ -2707,7 +2864,7 @@ span.workspace-tab__select { cursor: default; }
 .thread-details dt { flex: none; color: var(--muted); }
 .thread-details dd { display: flex; align-items: center; justify-content: flex-end; gap: 5px; min-width: 0; margin: 0; color: var(--text); text-align: right; overflow-wrap: anywhere; }
 .thread-details__status { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--ready); }
-.thread-details__status.is-working { background: var(--blocked); }
+.thread-details__status.is-working { background: var(--frame-accent); }
 .thread-details__activity { list-style: none; margin: 0; padding: 0; }
 .thread-details__activity li { display: flex; align-items: flex-start; gap: 8px; padding: 10px 0; border-bottom: .5px solid var(--panel-edge); }
 .thread-details__activity li > svg { flex: none; margin-top: 2px; color: var(--muted-2); }
@@ -2757,18 +2914,34 @@ span.workspace-tab__select { cursor: default; }
 .update-notes summary { cursor: pointer; color: var(--muted); }
 .update-notes p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; user-select: text; }
 
-.activity { border-radius: var(--r-lg); padding: 4px 0; margin: 4px 0; color: var(--muted); }
-.activity--active { padding: 0; background: transparent; color: var(--blocked); }
-.activity__toggle { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; padding: 2px 0; background: transparent; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; flex-wrap: wrap; }
-.activity__toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 4px; border-radius: 3px; }
-.activity__count, .activity__status { color: var(--muted); font-size: 12px; }
-.activity__status { margin: 7px 0 0 20px; overflow-wrap: anywhere; }
-.activity__history { margin-top: 12px; padding-left: 12px; border-left: 2px solid var(--panel-edge); }
-.activity__history .msg { padding-bottom: 16px; font-size: 13px; line-height: 1.6; }
-.activity__history .msg:last-child { padding-bottom: 0; }
-.msg--activity { padding-bottom: 18px; }
-.activity:not(.activity--active) { margin: 0; padding: 0; }
-.activity__toggle { font-size: 14px; font-weight: 500; line-height: 1.5; }
+/* Tool calls and thinking between two messages: one quiet line, opened while
+   it is the newest thing happening. */
+.msg--steps { padding-bottom: 14px; }
+.steps { color: var(--muted); }
+.steps__toggle { display: flex; align-items: baseline; gap: 8px; width: 100%; min-width: 0; border: 0; padding: 2px 0; background: transparent; color: inherit; font: inherit; font-size: 13px; line-height: 1.5; text-align: left; cursor: pointer; }
+.steps__toggle:hover { color: var(--text); }
+.steps__toggle:focus-visible { outline: 2px solid var(--frame-accent); outline-offset: 3px; border-radius: 3px; }
+.steps__chevron { flex: none; width: 10px; font-size: 10px; color: var(--muted-2); }
+.steps__summary { flex: none; font-weight: 500; }
+.steps__failed { flex: none; color: var(--danger); font-size: 12px; }
+.steps__latest { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-2); font-size: 12px; }
+.steps__list { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 0 18px; }
+.steps__list .msg { padding: 0; font-size: 13px; line-height: 1.6; }
+
+/* How a finished turn went. A footnote, not a heading. */
+.msg--turn-end { padding-bottom: 22px; }
+.turn-end { display: flex; align-items: center; gap: 7px; color: var(--muted-2); font-size: 12px; }
+.turn-end__mark { width: 10px; text-align: center; color: var(--muted-2); }
+.turn-end--failed, .turn-end--failed .turn-end__mark { color: var(--danger); }
+
+/* Whether the agent is working, directly above the box. Coloured from the
+   theme's accent, like every other live control, rather than a fixed amber. */
+.working-bar { display: flex; align-items: center; gap: 9px; width: 100%; max-width: var(--column); min-width: 0; margin: 0 auto 8px; padding: 0 4px; color: var(--muted); font-size: 13px; line-height: 20px; }
+.working-bar__spinner { flex: none; box-sizing: border-box; width: 14px; height: 14px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--frame-accent) 22%, transparent); border-top-color: var(--frame-accent); animation: spin 0.9s linear infinite; }
+.working-bar__label { flex: none; color: var(--text); font-weight: 500; }
+.working-bar__time { flex: none; font-variant-numeric: tabular-nums; }
+.working-bar__detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-2); }
+.working-bar--waiting .working-bar__spinner { animation: none; border-color: var(--frame-accent); }
 
 /* Reference-matched workspace proportions and flat conversation surfaces. */
 .project-colours { display: flex; gap: 4px; padding: 6px 8px; }

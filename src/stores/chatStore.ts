@@ -57,6 +57,8 @@ const turnTimings = readTimings();
 const pendingStarts: Record<string, number> = {};
 const pendingEnds: Record<string, Pick<TurnTiming, "endedAt" | "outcome">> = {};
 const pendingApprovals = new Map<string, PendingApproval>();
+/** Conversations that reported an error during the turn now running. */
+const failedTurns = new Set<string>();
 
 function saveTimings(): void {
   try { localStorage.setItem("kitty.turnTimings", JSON.stringify(turnTimings)); } catch { /* Storage may be unavailable. */ }
@@ -720,11 +722,11 @@ export async function restartAgentContext(): Promise<void> {
   }
 }
 
-export async function send(text: string): Promise<void> {
+export async function send(text: string, attachments: ipc.Attachment[] = []): Promise<void> {
   if (state.busy) return;
 
   const trimmed = text.trimEnd();
-  if (!trimmed) return;
+  if (!trimmed && attachments.length === 0) return;
 
   const startedAt = Date.now();
   const projectId = state.project?.id;
@@ -749,12 +751,13 @@ export async function send(text: string): Promise<void> {
       publishActivity();
     }
     pendingStarts[sessionId] = startedAt;
+    failedTurns.delete(sessionId);
     // Opening a project may have failed to launch its CLI, or the process may
     // have exited since then. Ensure it is ready before accepting another turn.
     await ipc.startSession(sessionId);
     await ipc.setApprovalMode(sessionId, approvalMode);
     delete pendingEnds[sessionId];
-    const seq = await ipc.sendTurn(sessionId, trimmed);
+    const seq = await ipc.sendTurn(sessionId, trimmed, attachments.map(file => file.path));
     const timings = turnTimings[sessionId] ?? {};
     turnTimings[sessionId] = { ...timings, [seq]: { startedAt, ...timings[seq], ...pendingEnds[sessionId] } };
     delete pendingEnds[sessionId];
@@ -765,7 +768,7 @@ export async function send(text: string): Promise<void> {
       seq,
       kind: "user",
       text: trimmed,
-      meta: null,
+      meta: attachmentMeta(attachments),
       createdAt: Date.now(),
     });
     // The title is derived from the first message, so refresh the list. A
@@ -778,11 +781,20 @@ export async function send(text: string): Promise<void> {
     if (sessionId) {
       delete pendingStarts[sessionId];
       delete pendingEnds[sessionId];
-      activity.transcript(sessionId, [{ kind: "failed", errorKind: "process", message: message(error) }]);
+      activity.transcript(sessionId, [{ kind: "turnEnded", stop: { kind: "failed", message: message(error) } }]);
       publishActivity();
     }
     if (state.activeId === sessionId) set({ busy: false, error: message(error) });
   }
+}
+
+/** The same record the host keeps on the row, so the message shows its files at once. */
+function attachmentMeta(attachments: ipc.Attachment[]): string | null {
+  if (attachments.length === 0) return null;
+  return JSON.stringify({
+    images: attachments.filter(file => file.kind === "image").map(file => file.path),
+    files: attachments.filter(file => file.kind === "text").map(({ name, path, size }) => ({ name, path, size })),
+  });
 }
 
 /** Turns the chosen agent into a real session. Returns its id. */
@@ -1085,6 +1097,12 @@ function apply(event: TranscriptEvent): void {
       if (state.approval?.id === event.id) set({ approval: null });
       return;
 
+    case "turnStarted":
+      // Including a turn nobody here asked for: the agent picking a request
+      // up again by itself is still the agent working.
+      if (!state.busy) set({ busy: true, notice: null, status: null });
+      return;
+
     case "turnEnded":
       set({
         busy: false,
@@ -1125,7 +1143,10 @@ function apply(event: TranscriptEvent): void {
       return;
 
     case "failed":
-      set({ busy: false, approval: null, error: event.message });
+      // Said, but it does not end the turn: only the agent finishing does.
+      // Every turn that starts is ended exactly once by the host, including
+      // when the CLI dies, so this cannot leave the window working for ever.
+      set({ error: event.message });
       return;
 
     default:
@@ -1156,13 +1177,36 @@ export async function listen(): Promise<() => void> {
         const timings = turnTimings[batch.sessionId] ?? {};
         turnTimings[batch.sessionId] = { ...timings, [event.seq]: { startedAt: pendingStarts[batch.sessionId] ?? Date.now() } };
       }
-      if (event.kind === "turnEnded" || event.kind === "failed") {
+      if (event.kind === "turnStarted" && !(batch.sessionId in pendingStarts)) {
+        // Nobody pressed Send: the agent took the last request up again, for
+        // instance when a background task reported back. Its time continues
+        // that request's rather than starting a new count.
+        const now = Date.now();
+        pendingStarts[batch.sessionId] = now;
+        const timings = turnTimings[batch.sessionId] ?? {};
+        const seq = Math.max(-1, ...Object.keys(timings).map(Number));
+        const last = timings[seq];
+        if (last?.endedAt !== undefined) {
+          turnTimings[batch.sessionId] = { ...timings, [seq]: {
+            startedAt: now, priorMs: (last.priorMs ?? 0) + Math.max(0, last.endedAt - last.startedAt),
+          } };
+          saveTimings();
+        }
+      }
+      // Activity has already consumed the whole batch, including its end.
+      // The pending start still represents the turn at this event's position,
+      // so a failure and clean completion delivered together cannot go green.
+      if (event.kind === "failed" && batch.sessionId in pendingStarts) failedTurns.add(batch.sessionId);
+      if (event.kind === "turnEnded") {
         pendingApprovals.delete(batch.sessionId);
         const timings = turnTimings[batch.sessionId] ?? {};
         const seq = Math.max(-1, ...Object.keys(timings).map(Number).filter(seq => timings[seq]?.endedAt === undefined));
+        // An error during the turn colours its end even if the CLI then
+        // reports a clean finish.
+        const errored = failedTurns.delete(batch.sessionId);
         const ending: Pick<TurnTiming, "endedAt" | "outcome"> = {
           endedAt: Date.now(),
-          outcome: event.kind === "failed" || event.stop.kind === "failed" ? "failed" : event.stop.kind === "endTurn" ? "worked" : "stopped",
+          outcome: errored || event.stop.kind === "failed" ? "failed" : event.stop.kind === "endTurn" ? "worked" : "stopped",
         };
         if (seq >= 0) {
           turnTimings[batch.sessionId] = { ...timings, [seq]: {

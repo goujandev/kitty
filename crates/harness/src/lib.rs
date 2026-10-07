@@ -17,6 +17,37 @@ pub mod codex;
 
 use kitty_core::{HarnessId, SessionEvent};
 
+/// A picture the user attached, already checked and read by the host.
+///
+/// Both forms travel because the vendors want different ones: Claude takes
+/// the bytes inline, Codex reads the file itself from its path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageInput {
+    pub path: String,
+    pub mime: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Everything one user message carries.
+///
+/// Text documents are not here: the host folds them into `text`, labelled
+/// with their names, which every model reads the same way.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TurnInput {
+    pub text: String,
+    pub images: Vec<ImageInput>,
+}
+
+impl TurnInput {
+    #[must_use]
+    pub fn text(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            images: Vec::new(),
+        }
+    }
+}
+
 /// What a codec did with one input.
 ///
 /// Both halves matter. `events` goes up to the engine and the UI; `send` goes
@@ -91,8 +122,13 @@ pub trait Codec: Send {
     /// for the cases where a human needs to look.
     fn on_frame(&mut self, line: &str) -> Step;
 
-    /// Ask the model something.
-    fn send_turn(&mut self, text: &str) -> Step;
+    /// Ask the model something, with any pictures attached.
+    fn send_turn_input(&mut self, input: &TurnInput) -> Step;
+
+    /// Ask the model something in words alone.
+    fn send_turn(&mut self, text: &str) -> Step {
+        self.send_turn_input(&TurnInput::text(text))
+    }
 
     /// Stop the running turn in-band. Killing the process is the engine's
     /// escalation, not the codec's business.

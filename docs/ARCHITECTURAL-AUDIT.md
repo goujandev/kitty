@@ -498,6 +498,12 @@ Checks re-run on the working tree: `cargo clippy --workspace --all-targets -- -D
 - **Impact:** The next message is accepted by the UI and queued silently behind the still-running turn (`Pump::queued`), with no Stop button and no status.
 - **Recommendation:** Derive `busy` only from `TurnStarted` and `TurnEnded`, and forward `TurnStarted` to the frontend (it is dropped at `sessions.rs:229`). This is a sub-case of the host-owned runtime snapshot in F01.
 - **Validation:** Feed an oversized frame mid-turn through the fake CLI and assert the UI still shows the turn as running.
+- **Status (2026-10-07, T-042):** Addressed.
+  - The host forwards `TurnStarted` once per turn, and the frontend's `busy` follows `TurnStarted`/`TurnEnded`. A `failed` event is shown but no longer ends the turn; an error during a turn colours its end instead.
+  - The engine owns turns the CLI starts by itself (a Claude Code background task reporting back, a Codex sub-agent result), so Stop, queueing and shutdown apply to them.
+  - The Codex codec ignores turn, item, usage and error notifications from other threads: sub-agents share the app-server connection, and a sub-agent's `turn/completed` had been ending the conversation's turn while it was still working. A recorded 2026-10-07 trace confirms that child threads send their own `turn/started`, messages and `turn/completed` on the parent's connection.
+  - Codex `error` notifications with `willRetry: true` become a status line.
+  - The Claude codec drops `stream_event`, `assistant` and `user` frames that carry a `parent_tool_use_id` (sub-agent internals).
 
 ### S04. Adding a third harness touches the engine and the host
 
